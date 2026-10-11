@@ -947,7 +947,8 @@ python build_mod.py                 # 校验 + 页面级检查 + 打包
 | `check_caress_invariant.py` | 【页面1】告示不变式（选项提示 vs 页面档位） | ✓ |
 | `check_combat_page.py` | 遭遇战页结构（38 项断言） | ✓ |
 | `check_feat.py` | 成就注册与授予链路 | ✓ |
-| `check_stat_chips.py` | **提示宏**：参数写成数量、同一属性叠提示块、标签硬编码英文、写进链标 | ✓ |
+| `check_stat_chips.py` | **提示宏**：参数写成数量、同一属性叠提示块、标签硬编码英文、写进链标、符号个数≠数值 | ✓ |
+| `check_dead_end.py` | **死路页面**：输出了正文却没有链接来源的互斥分支（「has no usable links」） | ✓ |
 
 ### `check_conflicts.py` 做四件事
 
@@ -1159,6 +1160,36 @@ python build_mod.py --check-only   # 只校验 boot.json 引用的文件是否�
   参数不能是数量、同一行不能叠同一个提示宏、自建宏标签不能硬编码英文、
   提示宏不能写进链标、**行级符号=数值**、**作用域级数值集合=提示集合**。
   已用反例回归验证过（坏写法都能抓到，正常写法不误报）。
+
+### 故障 6：钱不够时点【等待出租车】报 `The passage Robert Taxi has no usable links.`
+
+- **现象**：PC 身上钱 < £5 时，在街上点【等待出租车 (0:02)】→
+  整页只有「你的钱不够付车费。」，没有**任何**可点的选项 →
+  SugarCube 抛红字 `The passage Robert Taxi has no usable links.`
+- **根因**（两层叠在一起）：
+  1. `Robert Taxi` 段落的结构是
+     `<<if $money gte 500>>…目的地链接…<<else>>    你的钱不够付车费。<</if>>`，
+     也就是**钱不够那一支本来就没有链接**；
+  2. 段落末尾的 `<<destination>>` 看着像个兜底，其实它只是个
+     `<<switch $bus>>` → `<<Xquick>>`（按目的地分派的快捷旅行链接）。
+     本 mod 为了让「上一次的目的地」不残留，在本段落开头写了 `<<unset $bus>>`
+     —— `$bus` 一空，`<<destination>>` 什么都不渲染。
+     **原版 `<<Bus>>` 段落有一模一样的结构却没暴露问题**，只是因为它不 unset `$bus`，
+     残留值恰好提供了几条可用链接 —— 属于「靠巧合活着」。
+- **修复**（采用需求方给的方案二，改动最小、且不碰补丁锚点）：
+  给「钱不够」那一支补一个【继续】链接，去向用 `$passagePrev`
+  （原版 `PassageHeader` 设置的「来这一页之前在哪」，
+  与 `<<link [[Confirm|$passagePrev]]>>` 同一惯用法），
+  并用 `Story.has()` 兜底，免得调试跳转进来时 `$passagePrev` 是 `"none"` 又变成死路。
+  > 为什么不用方案一（钱不够就不显示【等待出租车】）：那要改 `<<widget "buswait">>`，
+  > 而它的那行公交链接与 `boot.json` 的 `findString` 是逐字耦合的，
+  > 动它有脱锚风险；而且「藏掉入口」玩家不知道自己为什么叫不到车。
+- **防复发**：新增 `check_dead_end.py`（已接入 `build_mod.py`）。它把每个会渲染的段落
+  拆成「顺序执行区」与「互斥分支」，规则是：**输出了正文的分支，必须有链接来源**；
+  链接来源包括 `<<link>>` / `<<goto>>` / `<<add_link>>` 与本 mod 的链接型 widget，
+  而 **`<<destination>>` 不算**（它依赖 `$bus`）。
+  覆盖判定有两条：顺序区里有链接，或某个**带 `<<else>>`** 的 `if` 每一支都有链接。
+  `_test_dead_end.py` 是它的合成用例回归（7 例，含这个 bug 的原始形状与遭遇战页的易误报形状）。
 
 ### 变更 6：属性由自定义统计项改为原版四属性
 

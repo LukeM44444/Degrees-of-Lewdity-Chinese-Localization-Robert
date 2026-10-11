@@ -95,6 +95,23 @@
 	你的钱不够付车费。
 	<br><br>
 
+	/* ⚠️⚠️ 这里**必须**给一个可用链接，否则 SugarCube 会直接报
+	      「The passage Robert Taxi has no usable links.」（踩过）
+	   为什么钱不够时整页没有链接：
+	      · 本段落开头有 <<unset $bus>>（清掉上一次残留的目的地，防止
+	        重复渲染旧的目的地链接）；
+	      · 而下面的 <<destination>> 是按 `$bus` 分派 <<Xquick>> 链接的 ——
+	        `$bus` 被清空后它一个链接都不渲染。
+	      原版 <<Bus>> 段落有同样的结构却没暴露这个问题，只是因为它**不** unset $bus，
+	      残留值恰好提供了几条可用链接；本 mod 清干净之后就把这层巧合去掉了。
+	   去向用 $passagePrev（原版 PassageHeader 设置，就是「来这一页之前在哪」），
+	   与 <<link [[Confirm|$passagePrev]]>>（原版 Downgrade Waiting Room）同一惯用法。
+	   ⚠️ 兜底不能省：调试跳转进来时 $passagePrev 可能是 "none" 或空，
+	      那样又会变成「无可用链接」，所以用 Story.has() 校一次。 */
+	<<set _rtFareBack to ($passagePrev and $passagePrev isnot "none" and Story.has($passagePrev)) ? $passagePrev : "Domus Street">>
+	<<link [[继续|_rtFareBack]]>><</link>>
+	<br>
+
 <</if>>
 
 <<destination>>

@@ -228,7 +228,7 @@ def run_page_checks():
 
     scripts = ["check_comments.py", "check_expr_chars.py",
                "check_caress_invariant.py", "check_combat_page.py",
-               "check_feat.py", "check_stat_chips.py"]
+               "check_feat.py", "check_stat_chips.py", "check_dead_end.py"]
     failed = []
     for name in scripts:
         path = os.path.join(HERE, name)

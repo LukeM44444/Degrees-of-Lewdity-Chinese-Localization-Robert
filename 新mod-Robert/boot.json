@@ -39,6 +39,7 @@
     "check_feat.py",
     "check_macros.py",
     "check_stat_chips.py",
+    "check_dead_end.py",
     "translations/CN.json",
     "translations/EN.json"
   ],

@@ -1,0 +1,194 @@
+:: Robert Encounter Guard [widget]
+/* ===========================================================================
+ * 遭遇战守卫：阻止 NPC 把生殖器凑到玩家的阴部 / 阴茎上
+ * ===========================================================================
+ *
+ * 为什么需要
+ * ---------------------------------------------------------------------------
+ * 症状：场景里冒出「Robert阴茎悬在你阴道上。」，同时手部行动里
+ *       再也看不到【抓住肉棒】/【玩弄小穴】/【揉弄阴蒂】。
+ *
+ * 原因在引擎自己的 <<penisinit>> / <<vaginainit>>（man-combat.twee:5890 / 6325）。
+ * 这两个 widget 用 `$enemyanger + $rng` 掷点决定 NPC 的生殖器贴到哪里
+ * （$rng 是 1–100，见 base.js:690）。掷到 171 以上就执行：
+ *
+ *     man-combat.twee:6268-6278
+ *         <<set $vaginause to "penis">>
+ *         <<set $NPCList[_n].penis to "vaginaentrance">>   ← 「悬在你阴道上」
+ *     man-combat.twee:6401
+ *         <<set $penisuse to "othervagina">>
+ *         <<set $NPCList[_n].vagina to "penisentrance">>
+ *
+ * 一旦进入这些状态，NPC 的生殖器就"占"在玩家的阴部/阴茎上，
+ * 「用手针对对方生殖器」那类行动自然不再生成。
+ *
+ * $enemyanger 是怎么涨起来的
+ * ---------------------------------------------------------------------------
+ *   <<brat>>        base-system/widgets.twee:407   $enemyanger += 5 * N
+ *   <<defiance>>    base-system/widgets.twee:380   $enemyanger += 5 * N
+ * 而玩家**每次脱对方衣服**都会调 <<brat 1 $lefttarget>>
+ * （actions…… effects.twee:1352），几回合就能推过 171。
+ *
+ * 做法（两道，互不冲突）
+ * ---------------------------------------------------------------------------
+ * ① 预防：战斗循环每回合把 $enemyanger 归零（放在 <<effects>> 之前）。
+ *    自愿遭遇战里玩家做的是爱抚，本来就不该积累怒气 —— 归零是还原语义，
+ *    不是作弊。这样 `$enemyanger + $rng` 最高 100，永远落在安全分支。
+ *
+ * ② 兜底：万一仍有别的路径把状态设脏，本 widget 把它按回来。
+ *    只碰「生殖器对生殖器」这一类状态，**不碰任何**：
+ *      · $NPCList[0].lefthand / righthand   → 他的手仍可自由抚摸玩家
+ *      · 玩家自己的左/右手状态、手部行动       → 玩家仍可去摸他
+ *      · $NPCList[0].mouth                   → 说话不受影响
+ *      · 玩家生殖器被对方手服务的状态           → 不影响
+ * =========================================================================== */
+
+/* 生殖器隔离守卫。
+ *
+ * ⚠️ 双方都可能有阴茎/阴道，共 2×2 = 4 种组合，所以**两个方向都要处理**：
+ *
+ *   A. 罗伯特的阴茎 → 玩家的某个孔 / 玩家的阴茎
+ *        状态记在 $NPCList[0].penis 上：
+ *          "vaginaentrance" / "vaginaimminent"  → 对着玩家阴道
+ *          "penisentrance"                      → 对着玩家阴茎
+ *          "otheranusentrance" / "otheranus"    → 对着玩家臀部
+ *        同时玩家侧被写入 $vaginause / $penisuse（表示"被占"）。
+ *
+ *   B. 玩家把**自己的**阴茎 → 罗伯特的阴道 / 臀部
+ *        状态记在 $penisuse 上（见 actions-penis.twee:270 `effectspenistovagina`）：
+ *          "othervagina" / "othervaginaentrance"   → 玩家阴茎对着他阴道
+ *          "otheranus" / "otheranusentrance"       → 玩家阴茎对着他臀部
+ *        同时 $NPCList[0].vagina 或 .penis 被写成 "penisentrance" / "otheranusentrance"。
+ *        这两种状态下罗伯特的生殖器不在"等着被手碰"的位置，
+ *        <<leftgrabnew>> 那类行动同样生成不出来，所以也要挡。
+ *
+ * ⚠️ 只碰"生殖器对生殖器/孔"这一类状态，**绝对不碰**：
+ *      · $NPCList[0].lefthand / .righthand   → 他的手仍要能抚摸玩家
+ *      · 玩家自己的 $leftarm / $rightarm / $leftaction / $rightaction
+ *      · $NPCList[0].mouth                   → 说话不受影响
+ *      · 玩家生殖器被对方**手**服务的状态       → 不影响
+ *
+ * ⚠️ $NPCList[0] 的 vagina 常常是 "none"（男性 NPC），
+ *    所以每条判断都先确认它不是 "none"，免得把"没有这个器官"误改成 0。
+ *
+ * ⚠️ 执行顺序有意义：A 段先把"他的器官指向玩家"按掉，B 段再处理
+ *    "玩家的器官指向他"。B 段读到的 _rgv / _rgp 会是 A 段更新后的值，
+ *    所以 B 段里对罗伯特侧的两条判断是兜底、幂等的，不会重复生效。 */
+<<widget "robertGuardNpcPenis">>
+<<if $robertHandsOnly is 1>>
+
+	/* ---------- A. 罗伯特的阴茎指向玩家 ---------- */
+	<<set _rgp to ($NPCList[0].penis is undefined ? "" : String($NPCList[0].penis))>>
+	<<if _rgp isnot "none" and (_rgp.startsWith("vagina") or _rgp.startsWith("penis") or _rgp is "otheranus" or _rgp is "otheranusentrance" or _rgp is "otheranusimminent")>>
+		<<set $NPCList[0].penis to 0>>
+		<<set $NPCList[0].location.genitals to 0>>
+	<</if>>
+
+	/* 玩家侧对应的"被占"状态一并解除（只在确实指向玩家时） */
+	<<if _rgp.startsWith("vagina")>>
+		<<set $vaginause to 0>>
+		<<set $vaginastate to 0>>
+		<<unset $vaginatarget>>
+	<</if>>
+	<<if _rgp.startsWith("penis") or _rgp is "otheranus" or _rgp is "otheranusentrance" or _rgp is "otheranusimminent">>
+		<<set $penisuse to 0>>
+		<<set $penisstate to 0>>
+		<<unset $penistarget>>
+	<</if>>
+
+	/* ---------- A2. 罗伯特的阴道指向玩家（他若有阴道） ---------- */
+	<<set _rgv to ($NPCList[0].vagina is undefined ? "" : String($NPCList[0].vagina))>>
+	<<if _rgv isnot "none" and (_rgv.startsWith("penis") or _rgv is "facesit" or _rgv is "otheranus" or _rgv is "otheranusentrance" or _rgv is "otheranusimminent")>>
+		<<set $NPCList[0].vagina to 0>>
+		<<set $NPCList[0].location.genitals to 0>>
+	<</if>>
+	<<if _rgv.startsWith("penis") or _rgv is "otheranus" or _rgv is "otheranusentrance" or _rgv is "otheranusimminent">>
+		<<set $penisuse to 0>>
+		<<set $penisstate to 0>>
+		<<unset $penistarget>>
+	<</if>>
+
+	/* ---------- B. 玩家的阴茎指向罗伯特 ---------- */
+	<<set _rgu to ($penisuse is undefined ? "" : String($penisuse))>>
+	<<if _rgu is "othervagina" or _rgu is "othervaginaentrance" or _rgu is "othervaginaimminent" or _rgu is "otheranus" or _rgu is "otheranusentrance" or _rgu is "otheranusimminent">>
+		<<set $penisuse to 0>>
+		<<set $penisstate to 0>>
+		<<unset $penistarget>>
+		/* 罗伯特侧被写进去的"被插入"状态也复位 */
+		<<if _rgv is "penisentrance" or _rgv is "otheranusentrance">>
+			<<set $NPCList[0].vagina to 0>>
+			<<set $NPCList[0].location.genitals to 0>>
+		<</if>>
+		<<if _rgp is "penisentrance" or _rgp is "otheranusentrance">>
+			<<set $NPCList[0].penis to 0>>
+			<<set $NPCList[0].location.genitals to 0>>
+		<</if>>
+	<</if>>
+
+	/* ---------- C. 【只靠近口部】场景专用 ----------
+	 *
+	 * 与手部场景不同：口部场景要的是让他**一直停在嘴边**，
+	 * 而不是「把生殖器从他身上撤走」。
+	 *
+	 * A / A2 段负责把他挪到玩家阴道/臀部/阴茎上的状态清掉；
+	 * 这一段负责在他离开口部位置时，按引擎自己的写法
+	 * （man-combat.twee:6001）**把他放回嘴边** ——
+	 * 即「一进入场景就靠近口部，之后也一直保持」。
+	 *
+	 * ⚠️ 为什么不能只是清掉：清掉之后 <<mouthActionInit>> 的
+	 *    「其他嘴」那组行动就生成不出来，玩家的核心选项会消失 ——
+	 *    与手部场景里「抓住肉棒」消失是同一类问题。
+	 *
+	 * ⚠️ 判断条件用 $mouthuse 就够：
+	 *    口部场景里 $mouthuse 与「他的生殖器位置」是同步的
+	 *    （都表示「正在用嘴」）。一旦它不等于本场景该有的值，
+	 *    就说明他离开了嘴边，这时设回就位即可；
+	 *    放回后条件不再命中，下一回合不会来回抖。
+	 *
+	 * ⚠️⚠️ 该有的值**取决于罗伯特的器官**（踩过）：
+	 *      有阴茎 → "penis"      + penis "mouthentrance" + mouthstate "entrance"
+	 *      只有阴道 → "othervagina" + vagina "mouth"      + mouthstate "othervagina"
+	 *    范式见 man-combat.twee:6001（阴茎）与 :6371（阴道）。
+	 *    第一版一律设成阴茎那一组，于是只有阴道的罗伯特会走到阴茎分支、
+	 *    <<npcPenis>> 退回 "none"，正文出现「把她的 none 抵在你的嘴唇上」。 */
+	<<set _rgHasPenis to ($NPCList[0].penis isnot "none")>>
+	<<set _rgWantMouth to (_rgHasPenis ? "penis" : "othervagina")>>
+
+	/* ---------- D. 两个场景共用的 $description 覆盖 ----------
+	 * ⚠️ 把 $description 换成**本地化后的角色名**。
+	 *    <<combatPersons>>（base-system/text.twee:1857）取的是 $description，
+	 *    而 $description 对具名 NPC 等于 `title`（＝职业词 "taxi driver"），
+	 *    于是正文会写成「taxi driver的手…」这种英文词混在中文里。
+	 *    这里覆盖成中文名，正文才是「罗伯特…」。
+	 *
+	 * ⚠️ **手部场景也要覆盖**（原来是只给口部场景写的）：
+	 *    手部遭遇战的正文同样走 <<combatPersons>>，不覆盖就会印出职业词。
+	 *    两个场景各有自己的标志，任一个成立就覆盖。
+	 * ⚠️ 只在本 mod 的这两个场景里做，不影响别处（别处 $description 表示
+	 *    「这个 NPC 该被称为什么」，拿掉 title 会让别的正文读起来不对）。 */
+	<<if $robertMouthOnly is 1 or $robertHandsOnly is 1>>
+		<<set $description to (RobertNPC?.t ? RobertNPC.t('RobertNPC.name') : "罗伯特")>>
+	<</if>>
+
+	<<if $robertMouthOnly is 1>>
+		<<if $mouthuse isnot _rgWantMouth>>
+			<<set $mouthuse to _rgWantMouth>>
+			<<set $mouthtarget to 0>>
+			<<if _rgHasPenis>>
+				<<set $mouthstate to "entrance">>
+				<<set $NPCList[0].penis to "mouthentrance">>
+				<<set $NPCList[0].vagina to "none">>
+			<<else>>
+				<<set $mouthstate to "othervagina">>
+				<<set $NPCList[0].vagina to "mouth">>
+			<</if>>
+			<<set $NPCList[0].location.genitals to "head">>
+		<</if>>
+	<</if>>
+
+	/* 位置复位，免得他"压在"玩家身上导致姿势相关行动消失。
+	   （上面 C 段已经设过 location.genitals，这里只补 head。） */
+	<<set $NPCList[0].location.head to 0>>
+
+<</if>>
+<</widget>>

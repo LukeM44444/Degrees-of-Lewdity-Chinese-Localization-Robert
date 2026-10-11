@@ -1,0 +1,243 @@
+:: Robert Ride Event [widget]
+/* ===========================================================================
+ * 表白事件 —— 罗伯特开车路过牛津街
+ * ===========================================================================
+ *
+ * 触发条件与概率在 modules/robert-ride.js 里判定。
+ * 本段落提供 <<robertoffersride>>，由 boot.json 的补丁 4 插入原版
+ * Oxford Street 段落（overworld-town/loc-street/oxford.twee）。
+ *
+ * ⚠️ 只在 Oxford Street 段落里调用，所以「玩家在牛津街」这条
+ *    由调用点天然保证 —— 不要额外去判断 $location：
+ *    学校、博物馆等地点走的是别的段落，不会调到这里。
+ *
+ * ⚠️ 代词一律写中文「他」：罗伯特的 gender / pronoun 都是 'm'（见
+ *    framework.js 的 NPC_DATA），而且全 mod 的中文正文都是手写中文代词、
+ *    只有名字走 <<robertName>>。用原版 <<he>> 宏在这里只会得到英文。
+ *
+ * 页面流程：
+ *   Robert Ride 1（正文 + 两个选项）
+ *     ├ 同意           → Robert Ride Accept → 【继续】→ 回牛津街
+ *     └ 我再考虑考虑   → Robert Ride Refuse → 【继续】→ 回牛津街
+ * =========================================================================== */
+
+<<widget "robertoffersride">>
+	<<if RobertNPC?.checkRide?.() is (RobertNPC?.RIDE_RESULT?.YES ?? "yes")>>
+		<<set $eventskip to 1>>
+		<<robertRideEvent>>
+	<</if>>
+<</widget>>
+
+/* 跳到事件第一页的入口。
+ *
+ * ⚠️⚠️ 必须用 <<goto "段落">>，**不要**写 <<run Engine.play("…")>>。
+ *    本 widget 是在**牛津街段落渲染过程中**被调用的（<<robertoffersride>> 由
+ *    boot.json 补丁 4 插在 Oxford Street 顶层）。在渲染过程中直接调
+ *    Engine.play 会立刻去渲染目标段落，可是本段落的渲染随后收尾时又会把
+ *    自己的输出写进 #passages —— **把目标页整页覆盖掉**。
+ *    症状：事件触发后玩家看到一整页空白，用侧边栏的历史回溯反而能看到正确页面。
+ *
+ *    SugarCube 的 <<goto>>（format.js:419352）内部正是为这个场景写的：
+ *        Config.navigation.gotohell || (Wikifier.stopWikify = 2);
+ *        setTimeout(() => Engine.play(passage), Engine.minDomActionDelay);
+ *    即「停掉本段落剩余渲染 + 把跳转推迟到当前 DOM 任务之后」。
+ *    stopWikify 会在下一段渲染开始时由 Passage.render 重置为 0
+ *    （format.js:445830），所以不会污染后续段落。
+ *
+ *    参考实现：哈珀 mod 全库都用 <<goto "…">>，包括插进原版
+ *    <<widget "streeteffects">> 的街头事件跳转
+ *    （其 boot.json `<<goto "Harper Estate Blame Street">>`）—— 与本处场景完全相同。
+ *    本 mod 第一版误以为「<<goto>> 不是 SugarCube 宏（grep 不到 Macro.add("goto")）」，
+ *    其实它是 SugarCube 内建宏，只是注册在引擎内部而不是故事文件里。
+ *
+ * ⚠️ 跳转仍然由 Engine.play 完成，:passageinit 会正常执行 ——
+ *    <<npc Robert>> 依赖它才会生效。
+ *
+ * ⚠️ $eventskip 在触发时置 1、离开时（各页的【继续】里）清 0。
+ *    另外 checkRide 会读它：普通街边事件刚触发过的这一次不再抢。
+ *    ⚠️ <<goto>> 会停掉牛津街段落的剩余渲染，所以该段落末尾那句
+ *       <<set $eventskip to 0>>（oxford.twee:267）这一次不会执行 ——
+ *       $eventskip 保持为 1，正好挡住「同一趟连出两个事件」，
+ *       checkRide 也会因此返回 NO（不会紧接着又表白一次）；
+ *       下一次进入牛津街时会正常清零。 */
+<<widget "robertRideEvent">>
+	<<goto "Robert Ride 1">>
+<</widget>>
+
+/* 事件各页共用的场景准备。
+ *
+ * ⚠️ 地图报错（<<map>> 抛 TypeError）的**真正修法不在本 widget**，
+ *    而在 modules/robert-ride.js 的 ensureMapEntries —— 它把本事件的段落名
+ *    预先登记进 $map.available，且是在 :passageinit 里跑的，
+ *    早于正文渲染。原因见那里的详细说明（<<map>> 读
+ *    `$map.available[$passage].includes(...)`，非原版段落名就是 undefined）。
+ *
+ *    这里保留 $passageOverride 是为了**其它**依赖 $passage 的逻辑
+ *    （比如 diagnostics 想显示「当前地点」、以及任何按段落名分岔的原版代码）。
+ *    即使不设它，地图也不会再崩 —— 但设上更准确。
+ *
+ * ⚠️ 同时把 $outside / $location 设成与街道一致：
+ *    回程要回牛津街，环境变量得是「在镇上户外」。
+ */
+<<widget "robertRideScene">>
+	<<set $passageOverride to "Oxford Street">>
+	<<set $outside to 1>>
+	<<set $location to "town">>
+	<<set $map.location to "oxford">>
+	/* 双保险：:passageinit 已经登记过，这里再补一次（幂等）。
+	   万一玩家是从调试菜单直接跳进来的，也不会崩。 */
+	<<run RobertNPC?.ensureMapEntries?.()>>
+<</widget>>
+
+/* 罗伯特的生殖器描述 —— **阴茎优先**。
+ *
+ * 需求：罗伯特只有阴茎、或阴茎与阴道都有时，只显示阴茎；
+ *      只有阴道时才显示阴道。
+ *
+ * ⚠️ 不能直接用原版 <<npcGenitals>>（base-system/text.twee:6105）——
+ *    它的分支顺序是「两个都有 → 全印；否则谁有印谁」：
+ *        <<elseif penis isnot "none" and vagina isnot "none">>
+ *            阴茎 and 阴道              ← 两性器官并存时两个都印
+ *    所以两性罗伯特会得到「阴茎和阴道」，与需求不符。
+ *
+ * ⚠️ 也**不要**去改原版 <<npcGenitals>> 本身：别的 NPC（尤其原版那几位
+ *    双性角色）依赖它「两个都印」的行为，改了对他们是破坏。本 mod 只提供
+ *    自己的变体，供罗伯特的正文使用。
+ *
+ * ⚠️ 判据用 "none"（器官不存在），不是 0 / "clothed"（衣物状态）——
+ *    这与原版一致，见 <<npcgloryhole>>（npc-behaviour.twee:192）的写法。
+ */
+<<widget "robertGenitals">>
+	/* _args[0] 是 $NPCList 的下标（默认 0 = 遭遇战里的那一位）。
+	   ⚠️ 这里传的是**数字**而不是字符串：<<npcPenis>> 内部读
+	      `$NPCList[$_npcGen]`，而 JS 里 "0" 和 0 都是合法下标，
+	      传数字更不容易在拼接时出错。 */
+	<<set _rgIdx to Number(_args[0] ?? 0)>>
+	<<if !$NPCList[_rgIdx]>>
+		<span class="red">error-robertGenitals-<<= _rgIdx>></span>
+	<<elseif $NPCList[_rgIdx].penis isnot "none">>
+		<<npcPenis _rgIdx>>
+	<<elseif $NPCList[_rgIdx].vagina isnot "none">>
+		<<npcVagina _rgIdx>>
+	<<else>>
+		/* 两者都 "none"（无性）——不该出现在罗伯特身上，给个显眼提示便于排查 */
+		<span class="red">error-robertGenitals-none-<<= _rgIdx>></span>
+	<</if>>
+<</widget>>
+
+:: Robert Ride 1
+/* 表白主页面。由 <<robertoffersride>> 触发。
+ * <<npc Robert>> 放在这里（而不是 widget 里）—— 它是本事件的第一个页面，
+ * 只需要初始化一次，不涉及循环，所以没有 ⚠️1 那个「每回合重设衣着」的问题。
+ * ⚠️ <<robertRideScene>> 必须放在最前面：它补 $map.available 的条目，
+ *    否则 <<map>> 会在本页抛 TypeError（见该 widget 的说明）。 */
+<<robertRideScene>>
+<<npc Robert>><<person1>>
+
+你沿着牛津街往前走。一辆出租车从身后驶来，车速压得很慢，最后在你身边停下。
+<br>
+车窗降下来，<<robertName>> 把上身从车里探出来，一只手臂搭在窗框上。
+<br>
+“上车吗？”他问。可你还没来得及回答，他又摇了摇头，像是把这句话收回去了。
+<br>
+“不是为这个来的。”他说，“我想过很多次要怎么跟你说。”
+<br>
+他看着你，路灯的光落在他眼睛里。
+<br>
+“一开始我把你当成宣泄压力的工具。”他说得很慢，像是每个字都掂过，
+“跑夜车的人总得有个地方放下那些东西。你刚好在那里。”
+<br>
+他停了一下。
+<br>
+“但现在不是了。现在……我爱上你了。”
+<br>
+他伸出手，指尖碰到你的脸侧。那个吻落下来的时候，带着一种
+<span class="pink">令人惊讶的温柔</span> —— 和他握方向盘的手、和他说话的方式都不像。
+<br>
+分开的时候，他的额头还抵着你的。
+<br>
+“所以，”他说，“你现在是我的情人了。”
+<br><br>
+
+<<link [[同意|Robert Ride Accept]]>><<set $robertRideChoice to "accept">><</link>>
+<br>
+<<link [[我再考虑考虑|Robert Ride Refuse]]>><<set $robertRideChoice to "refuse">><</link>>
+<br>
+
+:: Robert Ride Accept
+/* 同意 → 建立恋人关系 → 结算页 → 【继续】结束。
+ *
+ * ⚠️ 用原版 <<loveInterestAdd "Robert">>，不要自己写 $loveInterest.primary：
+ *    它除了赋值，还会处理「主要/次要/第三」槽位与 awarelevel 门槛，
+ *    并印出原版风格的 <span class="gold">「X is now your love interest!」</span>。
+ *    罗伯特已在 framework.js 的 NPC_CONFIG 里登记 loveInterest: true，
+ *    框架会把它并进 setup.loveInterestNpc（原版那个四路汇合点），
+ *    所以这里可以直接调用。
+ * ⚠️ $robertRideChoice 在 <<link>> 里设一次，本页只读取、不重置。
+ * ⚠️ **$robertRomance 是本页的核心产出**：framework.js 的 NPC_CONFIG
+ *    用 `$robertRomance === true` 作为唯一的 romance 解锁条件
+ *    （isPossibleLoveInterest）。也就是说「罗伯特能不能被选为恋人」
+ *    完全由这里的事件决定 —— 爱意刷多高都不行。
+ * ⚠️ <<robertRideScene>> 见 Robert Ride 1 的说明。 */
+<<robertRideScene>>
+<<set $robertRomance to true>>
+<<run RobertNPC?.addStat?.('love', 3)>><<ggglove "Robert">>
+<<npc Robert>><<person1>>
+
+“好。”你说。
+<br>
+他怔了一下，像是没准备好真的听到这个字。然后他笑了 —— 那是你第一次见他
+这样笑，眼角的纹路都松开了。
+<br><br>
+“我跑车八年，”他说，“从来没在路边停这么久过。”
+<br><br>
+
+<<loveInterestAdd "Robert">>
+<br>
+
+他伸手把副驾的门推开。
+<br>
+“我还有一趟活。”他说，“客人等着呢，再不去要挨骂了。”
+<br>
+他看了你一眼，那点笑意还留在脸上。
+<br>
+“晚点。晚点再聊。”
+<br>
+车门关上，出租车汇进车流，尾灯在街角拐弯的地方闪了一下就不见了。
+<br><br>
+
+<<robertOption [[继续|Oxford Street]]>>
+
+:: Robert Ride Refuse
+/* 考虑考虑 → 直接结束 → 10 天冷却。
+ *
+ * ⚠️ 冷却必须在**选择的那一刻**就设好，不要等玩家点【继续】：
+ *    否则玩家存档退出，冷却就丢了，反复重进可以无限重试。
+ * ⚠️ 「失落」的提示沿用原版 <<loveInterestAdd>> 的呈现方式 ——
+ *    同样是整段 <span class="gold"> 提示。需求指定的就是这个样式。
+ * ⚠️ 爱意 −3 → 提示 <<llllove "Robert">>（**三个减号**，符号个数 = 幅度）。
+ * ⚠️ <<robertRideScene>> 见 Robert Ride 1 的说明。 */
+<<robertRideScene>>
+<<run RobertNPC?.setRideCooldown?.(RobertNPC?.RIDE?.cooldownDays ?? 10)>>
+<<run RobertNPC?.addStat?.('love', -3)>><<llllove "Robert">>
+<<npc Robert>><<person1>>
+
+“我……我再考虑考虑。”你说。
+<br>
+他的手指在窗框上收了一下，很轻。那个笑没有完全退掉，但底下的光暗了下去。
+<br>
+“行。”他说，“本来就该让你想。”
+<br>
+他把身子退回车里，手搭上排挡。
+<br>
+“不着急。”他说。这句话说得很稳，稳得像是说给他自己听的。
+<br><br>
+
+<span class="gold"><<robertName>> 现在有些失落，并表示过段时间之后再来。<br>
+接下来的 <<= RobertNPC?.RIDE?.cooldownDays ?? 10>> 天里，他不会再出现在牛津街。</span>
+<br><br>
+
+车窗升上去，出租车开走了。
+<br><br>
+
+<<robertOption [[继续|Oxford Street]]>>

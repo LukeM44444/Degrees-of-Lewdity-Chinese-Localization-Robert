@@ -1,0 +1,39 @@
+:: Robert Feats [widget]
+/* ===========================================================================
+ * 成就（feat）——「恋人罗伯特」
+ * ===========================================================================
+ *
+ * 本文件只负责「什么时候检查」，**注册与授予逻辑都在 framework.js**：
+ *   RB.registerFeats()  把成就登记进 setup.feats
+ *   RB.earnLoverFeat()  按条件授予
+ *
+ * 原版系统要点（都核对过源码）：
+ *   · 成就表是静态的 `setup.feats`（04-Variables/feats.js:11），
+ *     条目形如 { title, desc, difficulty, series, filter }。
+ *   · 授予用宏 `<<earnFeat "键名">>`（feats.js:2165）。
+ *     ⚠️ 它内部读 `setup.feats[featName]` 而**没有存在性判断** ——
+ *        键名必须先注册，否则一调就抛异常。
+ *   · 判重键是 `V.feats.currentSave[键名]`，重复调用安全（幂等）。
+ *   · 界面显示的就是 `setup.feats[键].title` / `.desc`
+ *     （feats-ui.twee:120-121）—— 没有运行时翻译层，所以直接写中文。
+ *
+ * ⚠️ earnFeat 会在这些情况下**静默不授予**（feats.js:2166）：
+ *      V.feats.locked / V.cheatsEnabled / V.debug / V.gamemode is "soft"
+ *      / V.settings.allureModifier < 1 / V.statFreeze
+ *    「开过作弊的存档拿不到成就」是原版行为，不是 bug。
+ *
+ * 授予时机：原版失去童贞时会调 `<<awardVirginityFeat $_taker>>`
+ * （base-combat/widgets.twee:120，一个按 NPC 名分派的 <<switch>>）。
+ * boot.json 的补丁 5 往那个 switch 里加了一个 Robert 分支，落到本 widget。
+ * ⚠️ 这样接入的好处：不用自己盯童贞变量，也不改原版的判重逻辑。
+ * =========================================================================== */
+
+/* 由原版 <<awardVirginityFeat>> 在**确认失去童贞之后**调用，
+   所以这里不需要再查童贞变量；只需确认「已与罗伯特建立恋爱关系」，
+   这一步连同注册一起由 RB.earnLoverFeat() 处理。
+   ⚠️ 加 typeof 判断：万一脚本加载异常，也不要让原版流程报错。 */
+<<widget "robertTheLoverCheck">>
+	<<run (window.RobertNPC && typeof window.RobertNPC.earnLoverFeat === "function")
+		? window.RobertNPC.earnLoverFeat()
+		: undefined>>
+<</widget>>

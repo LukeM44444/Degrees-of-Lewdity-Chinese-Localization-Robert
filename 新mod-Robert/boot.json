@@ -1,0 +1,208 @@
+{
+  "name": "RobertNPC",
+  "nickName": {
+    "en": "Robert - New Love Interest",
+    "cn": "罗伯特 - 新增恋爱对象"
+  },
+  "version": "1.0.0",
+  "styleFileList": [
+    "robert-style.css"
+  ],
+  "scriptFileList_inject_early": [],
+  "scriptFileList_earlyload": [],
+  "scriptFileList_preload": [],
+  "scriptFileList": [],
+  "tweeFileList": [
+    "robert-tweak.twee",
+    "robert-storyinit.twee",
+    "robert-passages.twee",
+    "robert-taxi.twee",
+    "robert-taxi-event.twee",
+    "robert-guard.twee",
+    "robert-cheat.twee",
+    "robert-opinion.twee",
+    "robert-ride-event.twee",
+    "robert-feat.twee"
+  ],
+  "imgFileList": [
+    "img/npc/robert/占位图片.png",
+    "img/占位图片.png"
+  ],
+  "additionFile": [
+    "README.md",
+    "README_汉化说明.md",
+    "check_caress_invariant.py",
+    "check_combat_page.py",
+    "check_comments.py",
+    "check_conflicts.py",
+    "check_expr_chars.py",
+    "check_feat.py",
+    "check_macros.py",
+    "check_stat_chips.py",
+    "translations/CN.json",
+    "translations/EN.json"
+  ],
+  "additionBinaryFile": [],
+  "addonPlugin": [
+    {
+      "_comment": "秋枫白桦框架：注册语言、NPC 与模组脚本。framework-version 见下方 dependenceInfo",
+      "modName": "maplebirch",
+      "addonName": "maplebirchAddon",
+      "modVersion": "^4.1.0",
+      "params": {
+        "language": {
+          "CN": "translations/CN.json",
+          "EN": "translations/EN.json"
+        },
+        "script": [
+          "framework.js",
+          "modules/robert-stats.js",
+          "modules/robert-schedule.js",
+          "modules/robert-taxi.js",
+          "modules/robert-actiondefaults.js",
+          "modules/robert-npc-clothes.js",
+          "modules/robert-ride.js",
+          "modules/robert-gender.js"
+        ],
+        "npc": {
+          "NamedNPC": [],
+          "Stats": {}
+        }
+      }
+    },
+    {
+      "_comment1": "补丁 1：覆盖原版 <<widget \"buswait\">>，在【等公交】与【消磨时间】之间插入【等待出租车】",
+      "_comment2": "⚠️ findString 必须用**汉化后**的中文！原版源码是英文 \"Wait for a bus (0:02)\"，但 ModI18N 的汉化替换先于 TweeReplacer 执行，补丁阶段游戏文本已经是「等待公交车」。第一版写成英文导致匹配失败（errorCount:1）、补丁没生效、【等公交】反而变成英文。",
+      "_comment3": "这段中文与 robert-taxi.twee 里 <<widget \"buswait\">> 输出的那行必须逐字一致，改一处要同步另一处。",
+      "_comment4": "补丁 2：把罗伯特的两个作弊项插入作弊菜单 → NPC 栏。",
+      "_comment5": "锚点逐字取自 game/base-system/overlays/cheats.twee:1305-1306 —— Primary Relationships 那个 settingsGrid 的收尾。",
+      "_comment6": "⚠️ 这里**不覆盖** <<cheats-npcs>> widget（它有一千多行，整体复制会长期跟着原版漂移、也会和其他 mod 抢同一个 widget），而是只往它内部插一行调用。",
+      "_comment7": "⚠️ 开关与四个属性都写在 $settings.robertAlwaysDriver / V.NPCName 上，与其它作弊项同级。",
+      "modName": "TweeReplacer",
+      "addonName": "TweeReplacerAddon",
+      "modVersion": "^1.7.0",
+      "params": [
+        {
+          "_comment1": "覆盖 buswait widget",
+          "passage": "Widgets Bus",
+          "findString": "\t<<add_link \"<<busicon>><<link [[等待公交车 (0:02)|Bus]]>><<pass 2>><</link>><br>\">><<hideDisplay>>",
+          "replace": "\t<<buswait>>"
+        },
+        {
+          "_comment1": "在作弊菜单 → NPC 栏插入罗伯特的作弊项",
+          "_comment2": "插在 Primary Relationships 分区末尾，紧贴 <<cheats-npcs>> 里 </div><hr> 之前。",
+          "_comment3": "⚠️⚠️ findString 里的「渴望」必须是**汉化后**的文字！原版源码是 \"Yearning\"，但 ModI18N 的替换先于 TweeReplacer 执行 —— 汉化表里明写着把 `<<symbol yearning>> Yearning` 译成 `<<symbol yearning>>渴望`（i18n.json，fileName cheats.twee / pN Cheats）。第一版按英文写会匹配失败、补丁静默不生效。",
+          "passage": "Cheats",
+          "findString": "\t\t<<numberStepper \"<<symbol yearning>>渴望\" `C.npc.Gwylan.dom` { callback: value => { C.npc.Gwylan.dom = value }, max: 150 }>>\n\t\t\t</div>\n\t\t<</if>>\n\t</div>\n\t<hr>",
+          "replace": "\t\t<<numberStepper \"<<symbol yearning>>渴望\" `C.npc.Gwylan.dom` { callback: value => { C.npc.Gwylan.dom = value }, max: 150 }>>\n\t\t\t</div>\n\t\t<</if>>\n\t\t<<robertCheatNpc>>\n\t</div>\n\t<hr>"
+        },
+        {
+          "_comment1": "补丁 3：在 <<npcrelationship>> 里加罗伯特分支，让社交页面显示「罗伯特对玩家的看法」",
+          "_comment2": "⚠️ 为什么不改 <<relationshiptext>>：那是一千多行的 <<switch _npc>>，覆盖它必须整体复制；<<npcrelationship>> 只有十几行，锚点小得多、长期维护成本低。",
+          "_comment3": "⚠️ findString 里必须包含 <br> 那一行 —— 它会和 Robert 分支的 <<else>> 配对，否则 <br> 会落到 <<if>> 外面、所有 NPC 都多出一个换行。",
+          "_comment4": "该锚点未被汉化（汉化表里没有针对这两行的条目），也未被象牙怨灵 / 哈珀 mod 触碰。",
+          "passage": "Widgets Named Npcs",
+          "findString": "\t<<if $NPCName[_i].init is 1>>\n\t\t<<relationshiptext>>\n\t\t<br>\n\t<</if>>",
+          "replace": "\t<<if $NPCName[_i].init is 1>>\n\t\t<<if _npc is \"Robert\">>\n\t\t\t<<robertOpinionText>>\n\t\t<<else>>\n\t\t\t<<relationshiptext>>\n\t\t<</if>>\n\t\t<br>\n\t<</if>>"
+        },
+        {
+          "_comment1": "补丁 4：在牛津街段落里加入「罗伯特开车路过」的表白事件",
+          "_comment2": "插在 <<averySchedule>> 与 <<if $exposed gte 1>> 之间 —— 无条件的顶层位置。",
+          "_comment3": "⚠️⚠️ 第一版把它插进了 <<elseif>> 链内部（<<passoutstreet>> 与 <<elseif $mathsproject…>> 之间），那是错的：整条链是 `<<if 晕倒>> … <<elseif 数学课…>> …`，靠前的分支一旦命中（比如压力满值晕倒），后面的分支根本不会执行，widget 永远不被调用 —— 表现就是「事件钩子已被调用 0 次」。原版街边事件（<<streeteffects>>，oxford.twee:60）也在无条件的顶层。",
+          "_comment4": "⚠️ 位置放在 <<streeteffects>> 之后、<<if $exposed…>> 之前：压在普通街边事件之后，这样 $eventskip 已经被 <<streeteffects>> 定好了 —— 本 mod 的 checkRide 会读它，普通事件刚触发过的这一次就不再抢。段落末尾的 <<set $eventskip to 0>>（oxford.twee:267）会在离开时清掉。",
+          "_comment5": "⚠️ 两处锚点短，不要凭印象加 <</if>> —— 上一版加了就匹配 0 次。",
+          "_comment6": "⚠️ 事件一触发就 <<goto \"Robert Ride 1\">> 到自己的段落：<<goto>> 会停掉本段落剩余渲染，所以不需要额外挡。⚠️ 必须用 <<goto>>，**不能**用 <<run Engine.play(...)>> —— 在段落渲染过程中直接调 Engine.play，目标页会被本段落随后的渲染输出整页覆盖，症状是「点了选项后整页空白，只有历史回溯才看得到内容」。",
+          "_comment7": "⚠️ 概率「每时段只掷一次」在 modules/robert-ride.js 里用 $robertRideChecked 保证：掷失败也记账，否则玩家反复重进牛津街就能把概率刷到 100%。",
+          "_comment8": "⚠️「玩家在牛津街」这条由调用点保证 —— 学校和博物馆走的是别的段落，不会调到这里。",
+          "passage": "Oxford Street",
+          "findString": "<<averySchedule>>\n<<if $exposed gte 1>>",
+          "replace": "<<averySchedule>>\n<<robertoffersride>>\n<<if $exposed gte 1>>"
+        },
+        {
+          "_comment1": "补丁 5：给「为罗伯特失去童贞」加成就判定",
+          "_comment2": "原版 <<awardVirginityFeat>>（base-combat/widgets.twee:120）是个按 NPC 名分派的 <<switch>>，只列了原版那几位恋爱对象。这里追加一个 Robert 分支，指向本 mod 的 <<robertTheLoverCheck>>。",
+          "_comment3": "⚠️ 走这个入口的好处：不用自己盯童贞变量，也不改原版判重逻辑 —— 原版已经在确认失去童贞之后才调它（widgets.twee:47-53 只在 vaginal/penile 且童贞仍为 true 时才调）。",
+          "_comment4": "⚠️ 锚点是 Gwylan 那一行（switch 里最后一条）加收尾的 <</switch>> 与 <</widget>>。三个标签都要带上，否则会插到 widget 外面去。",
+          "_comment5": "⚠️ 分支里调的是 <<robertTheLoverCheck>> 而不是直接 <<earnFeat>>：成就还需要「已建立恋爱关系」这个前置条件（$robertRomance），判断放在那个 widget 里。",
+          "passage": "Widgets Combat",
+          "findString": "\t\t<<case \"Gwylan\">><<earnFeat \"Gwylan the Bewitching\">>\n\t<</switch>>\n<</widget>>",
+          "replace": "\t\t<<case \"Gwylan\">><<earnFeat \"Gwylan the Bewitching\">>\n\t\t<<case \"Robert\">><<robertTheLoverCheck>>\n\t<</switch>>\n<</widget>>"
+        },
+        {
+          "_comment1": "补丁 3：把罗伯特的社交页面配置加进原版 Social 的 T.npcConfig",
+          "_comment2": "四个属性（怒气 rage / 性欲 lust / 爱意 love / 支配 dom）全部复用原版字段名，所以不需要注册自定义统计项，社交页面会自动按原版样式渲染。important: true 让框架把 Robert 推进 T.importantNpcOrder（主要关系分组）。",
+          "_comment3": "⚠️ 锚点选的是 Zephyr 区块，因为它是「没有任何 mod 改动过的最后一个区块」：前方 Wren 在拼接边界上、后方 Ivory Wraith 被象牙怨灵当锚点、再后面的 Harper 区块是哈珀 mod 自己插入的。锚定 Zephyr 可保证与两个参照 mod 都不重叠。",
+          "_comment4": "注意原版 Social 里有一行 setup.loveAlias[T.npcData.nam]()，对没有别名的 NPC 会抛异常 —— 本 mod 在 NPC_CONFIG 里写了 loveAlias，正是为了让这一格能安全渲染。",
+          "passage": "Social",
+          "findString": "\t\t\t\t\t\"Zephyr\" : {\n\t\t\t\t\t\tlove : { maxValue : 100 },\n\t\t\t\t\t\tdom : { maxValue : 50 }\n\t\t\t\t\t},\n",
+          "replace": "\t\t\t\t\t\"Zephyr\" : {\n\t\t\t\t\t\tlove : { maxValue : 100 },\n\t\t\t\t\t\tdom : { maxValue : 50 }\n\t\t\t\t\t},\n\t\t\t\t\t\"Robert\" : {\n\t\t\t\t\t\timportant : true,\n\t\t\t\t\t\tlove : { maxValue : 100 },\n\t\t\t\t\t\tlust : { maxValue : 100 },\n\t\t\t\t\t\tdom : { maxValue : 100 },\n\t\t\t\t\t\trage : { maxValue : 100 }\n\t\t\t\t\t},\n"
+        }
+      ]
+    },
+    {
+      "_comment": "图片加载：让 ModLoader 从本 mod 的 zip 中加载 imgFileList 里的图片",
+      "modName": "ModLoader DoL ImageLoaderHook",
+      "addonName": "ImageLoaderAddon",
+      "modVersion": "^2.3.0",
+      "params": []
+    },
+    {
+      "_comment": "加载顺序：本 mod 必须在汉化(ModI18N)、图包(GameOriginalImagePack)、框架(maplebirch)之后加载",
+      "modName": "ConflictChecker",
+      "addonName": "ConflictCheckerAddon",
+      "modVersion": "^1.0.0",
+      "params": {
+        "mustAfter": [
+          {
+            "modName": "ModI18N",
+            "version": ">=1.0.0"
+          },
+          {
+            "modName": "maplebirch",
+            "version": ">=4.1.0"
+          }
+        ],
+        "optionalAfter": [
+          {
+            "modName": "GameOriginalImagePack",
+            "version": ">=1.0.0"
+          },
+          {
+            "modName": "Wraith'sReflection",
+            "version": ">=1.0.0"
+          },
+          {
+            "modName": "ClaimableHarper",
+            "version": ">=0.1.0"
+          }
+        ]
+      }
+    }
+  ],
+  "dependenceInfo": [
+    {
+      "modName": "ModLoader",
+      "version": "^2.100.0"
+    },
+    {
+      "modName": "GameVersion",
+      "version": "=0.5.11.9"
+    },
+    {
+      "modName": "maplebirch",
+      "version": ">=4.1.0"
+    },
+    {
+      "modName": "ModLoader DoL ImageLoaderHook",
+      "version": "^2.3.0"
+    },
+    {
+      "modName": "ModI18N",
+      "version": ">=1.0.0"
+    },
+    {
+      "modName": "TweeReplacer",
+      "version": "^1.7.0"
+    }
+  ]
+}

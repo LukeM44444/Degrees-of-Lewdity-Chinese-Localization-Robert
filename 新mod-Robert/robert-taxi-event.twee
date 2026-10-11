@@ -1,0 +1,1019 @@
+:: Robert Taxi Event Header [widget]
+/* ---------------------------------------------------------------------------
+ * RobertNPC —— 出租车事件：坐副驾驶
+ *
+ * 本段落带 [widget] 标签，只用来放这份流程说明，不会被渲染。
+ *
+ * 流程总览（改之前务必对照 README §5.3）：
+ *
+ *   ⚠️ 页面编号有两套，不要混：
+ *      · 副驾驶线（前后顺序）：【页面1】Caress、【页面2】Kiss 1、
+ *        【页面3】Kiss 2、【页面4】Kiss 3／Oral 4
+ *      · 后座线：【后座·页面1】= 座位选择页（Robert Taxi Seat 里的
+ *        <<robertTaxiRobertDrive>>）、【后座·页面2/3】= 事件（一）、
+ *        【后座·页面4/5】= 事件（二）
+ *
+ *   Robert Taxi Seat（判定司机）
+ *     ├─ 陌生司机      → <<robertTaxiStrangerDrive>> → <<robertTaxiArriveLink>>
+ *     ├─ 罗伯特/后座   → · 恋人 且 掷点 ≤ 10 → Robert Taxi Back Anger 1【后座·页面2】
+ *     │                  · 其余（非恋人 100% / 恋人 90%）
+ *     │                       → Robert Taxi Back Find 1【后座·页面4】
+ *     └─ 罗伯特/副驾驶 → Robert Taxi Front Seat Intro → Robert Taxi Hand
+ *
+ *   Robert Taxi Hand        手放到腿上  → 摆动腿部远离 / 保持不动
+ *   Robert Taxi Hand Aid    保持不动    → 淫乱判定 → 继续
+ *   Robert Taxi Slow Down   抚摸        → 淫乱判定 → 抵抗 / 无视
+ *   Robert Taxi Caress      【页面1】循环页 → 继续 / 结束
+ *                             └─ 淫乱 ≥2 级时额外给【将腿微微张开】
+ *                                  → Robert Taxi Kiss 1  【页面2】
+ *                                  → Robert Taxi Kiss 2  【页面3】循环
+ *                                  → Robert Taxi Kiss Climax（原版 <<orgasm>>）
+ *                                  → Robert Taxi Kiss 3  【页面4】
+ *   Robert Taxi Destination 到达        → 结算 + <<robertTaxiArriveLink>>
+ *
+ *   后座事件（一）「他最近有些火大」（恋人 10%）：
+ *   Robert Taxi Back Anger 1【后座·页面2】他开口要你帮忙解决
+ *     ├─【为其口交】（淫乱 ≥4 级）→ Robert Taxi Oral Fight（复用副驾驶线的口部遭遇战）
+ *     │      → Robert Taxi Caress Back Result → Robert Taxi Caress Back Rest
+ *     │      → Robert Taxi Destination（此时 $robertTaxiDriver 是 "stranger"，
+ *     │        所以只印一句平铺的到达文本，不走副驾驶的结算分支）
+ *     └─【无事发生】→ Robert Taxi Back Anger 2【后座·页面3】→ 到达，事件结束
+ *
+ *   后座事件（二）「座位上好像有什么东西」（其余全部情况）：
+ *   Robert Taxi Back Find 1【后座·页面4】感到座位上有东西
+ *     ├─【摸索一下】→ Robert Taxi Back Find 2【后座·页面5】
+ *     │      掷点：80% 什么也没有／20% 摸到钱 random(1,50) 英镑（<<moneyGain>>）
+ *     │      → 【下车】→ 到达，事件结束
+ *     └─【无事发生】→ Robert Taxi Back Find End → 到达，事件结束
+ *
+ * ⚠️ 六条硬规则（每一条都是踩过的坑）：
+ *
+ *   1. 选项一律用 <<robertOption>> / <<robertLewdOption>> /
+ *      <<robertArousalOption>>，它们各输出**一整行**（含结尾 <br>）。
+ *      **不要**再用 <ul class="robert-choices"> / <li> 包选项 ——
+ *      原版与哈珀 mod 全库都是「<<link>> 单独一行 + <br> 分隔」，
+ *      颜色宏是 <<link>> 的兄弟节点。详见 robert-tweak.twee 顶部说明。
+ *
+ *   2. 颜色提示**不能放进链标 [[…]]**。链标会被 link 宏取 .textContent，
+ *      HTML 标记被剥掉只剩文字，于是文字挤到「继续」后面 ——
+ *      这就是「文字错位 / 多出字段」的根源。
+ *
+ *   3. 到达**只能**用 <<robertTaxiArriveLink>>。原版 <<destination5>> /
+ *      <<destinationeventend>> 会多塞一条旅行链接，玩家会看到两个
+ *      效果相同的按钮。
+ *
+ *   4. 带淫乱判定的选项**不要**在这个宏后面接 <</li>> 或别的 <</...>>：
+ *      自定义宏 + 紧跟的 <</...>> 会被当成结束标签，那串东西会被当纯文本印出来。
+ *
+ *   5. 跨段落的状态必须用**存档变量 $**，不能用临时变量 _：
+ *      enginePlay() 每次进新段落都会 State.clearTemporary()，
+ *      `_` 变量跨不了段落。$robertTaxiJump 当初用 _ 时循环上限永远不生效。
+ *
+ *   6. 高潮不要跳自定义页面：<<orgasm>> 本身就是原版的高潮页（inline 宏），
+ *      就地调用即可。要跳到别的段落请用 <<goto "段落名">>，
+ *      **绝对不要**写 <<run Engine.play("…")>> —— 在本段落还没渲染完时
+ *      直接调 Engine.play，目标页会被本段落随后的渲染输出整页覆盖；
+ *      症状是「点了选项后整页空白，只有用历史回溯才看得到正确页面」。
+ *      原因与正确写法见 robert-taxi.twee 里 Robert Taxi Seat 后座分支的长注释。
+ * ------------------------------------------------------------------------- */
+
+
+:: Robert Taxi Front Seat Intro
+<<set $robertTaxiSeat to "front">>
+<<set $robertTaxiEnding to "">>
+<<set $robertTaxiKissPath to 0>>
+
+你拉开副驾驶的车门坐了进去，把包放在脚边。皮革座椅上还留着上一位乘客的温度。
+<br>
+安全带扣上的声音很轻。你转头望向车窗外，街灯一盏接一盏地从玻璃上滑过去，
+招牌、行人、橱窗里的暖光都开始向后退。
+<br>
+“去哪儿？”他问。
+<br>
+你把地址报给了他。他嗯了一声，把计价器按下，没有立刻起步，
+而是从后视镜里看了你一眼。
+<br>
+“坐前面的人不多。”他说，语气里听不出是随口一提还是别的什么。
+<br>
+引擎低低地响了一声，汽车缓慢启动，汇进夜里那条发亮的车流。
+<br><br>
+
+<<robertOption [[继续|Robert Taxi Hand]]>>
+
+:: Robert Taxi Hand
+<<set $robertTaxiEnding to "">>
+<<set $robertTaxiKissPath to 0>>
+
+罗伯特双手放在方向盘上，指节随着路面的起伏轻轻动着。仪表盘的光落在他手背上。
+<br>
+过了一会儿，右手脱离方向盘，缓慢的移向你 —— 先是停在变速杆上，又迟疑了一瞬，
+最后将右手放在你的腿上。
+<br>
+“你从上车起就没说话。”他说。
+<br>
+你没有回答。他也就不再追问，只是让那只手留在原处。
+掌心的温度隔着布料透过来，比车厢里的暖风更实在。你没有动，也没有说话。
+<br><br>
+
+<<link [[摆动腿部远离罗伯特的手|Robert Taxi Destination]]>><<set $robertTaxiEnding to "swing">><</link>>
+<br>
+<<robertOption [[保持不动|Robert Taxi Hand Aid]]>>
+
+:: Robert Taxi Hand Aid
+/* 保持不动：淫乱判定（0 级与 1 级同判定 → 压力 +10、性奋 +10）。
+   数值只改，提示由 <<robertLewdOption>> 负责显示。 */
+<<robertTaxiLewd 1>>
+
+罗伯特粗鲁的触碰让你的感官迅速处于高度警觉状态，你的视线从窗外转向你的腿部，
+注意到罗伯特的手轻触在你的腿部。
+<br>
+“你一直在看窗外。”他说，“是不想看我，还是不敢看？”
+<br>
+车厢里的声音忽然变得很清楚：引擎的低鸣、转向灯滴答的节奏、你自己心跳的鼓点。
+你屏住呼吸，指尖不自觉地收紧，攥住了膝盖上的布料。
+<br><br>
+
+<<robertLewdOption [[继续|Robert Taxi Slow Down]]>>
+
+:: Robert Taxi Slow Down
+/* 进入抚摸阶段：重置循环计数。
+   ⚠️ 同时把 $robertTaxiEnding 清空 —— 在抚摸之后的任何一步离开事件，
+      都属于「以保持不动结束」；只有点了【抵抗】才改成 "swing"。 */
+<<set $robertTaxiJump to 0>>
+<<set $robertTaxiEnding to "">>
+<<robertTaxiLewd 1>>
+
+罗伯特渐渐的将车速减慢下来，轮胎碾过积水的声音拖得长长的。
+<br>
+他的右手轻轻的抚摸在你的腿上，从膝盖外侧一路缓缓移到内侧，又退回去，
+像是在试探什么，又像是在等待什么。
+<br>
+“你要是想让我停手，”他说，“现在还来得及。”
+<br>
+“这条路夜里没什么人。”他又说了一句，像是解释，也像是别的什么，
+“我们都不赶时间。”
+<br>
+你的呼吸逐渐加粗，车窗上的雾气被你的气息晕开一小块。
+<br><br>
+
+<<link [[抵抗|Robert Taxi Destination]]>><<def 1>><<set $robertTaxiEnding to "swing">><</link>><<defianttext>>
+<br>
+<<robertLewdOption [[无视|Robert Taxi Caress]]>>
+
+:: Robert Taxi Caress
+/* 【页面1】循环页。
+   $robertTaxiJump 表示**已经点了几次【继续】**（不是页面出现了几次）：
+     · 从 Slow Down 首次进入时是 0 → 允许继续
+     · 点【继续】时 +1 再跳回本页
+     · 点到 4 之后不再显示【继续】，只剩【结束】
+   计数写在链接里（点的时候才加），不要写成段落开头的 <<set>> 自增。
+
+   选项顺序（等级高的在前）：
+     1【将腿微微张开】 淫乱 ≥2 级；首次之吻还在时挂 <<kissvirginitywarning>>
+     2【摸回去】       淫乱 ≥3 级
+     3【为其口交】     淫乱 ≥4 级
+                        （原版把口交定为 4 级，见 ingame.js:1526
+                          「Very lewd actions, like giving oral」）
+     4【继续】         $robertTaxiJump < 4 时显示
+     5【结束】         始终显示
+
+   ⚠️ 告示不变式：**每个带效果的选项，其效果必须与本段落开头的
+      <<robertTaxiLewd 档位>> 一致** ——
+      【继续】与【摸回去】都走 <<robertTaxiLewd 2>>（2 级及以上档位），
+      <<robertLewdOption>> 会按**实际**淫乱等级渲染压力/性奋提示。
+      检查脚本 check_caress_invariant.py 会强制这条，改坏了会直接报错。 */
+<<set $robertTaxiJump to $robertTaxiJump ?? 0>>
+<<set $robertTaxiBackJump to $robertTaxiBackJump ?? 0>>
+<<robertTaxiLewd 2>>
+
+罗伯特的右手继续轻轻的抚摸在你的腿上，时而用力，时而放缓。
+<br>
+“我开这车八年了。”他忽然说，“什么人都载过。”
+<br>
+他的拇指按着你的腿侧打着圈，其余四指跟着路面的颠簸轻轻起伏。
+<br>
+“可我没见过谁像你这样，明明不躲，也不说话。”
+<br>
+仪表盘的绿光在他手背上明明灭灭，你分不清那是车速在变，还是别的什么在变。
+<br>
+你的呼吸逐渐加粗，喉咙里那点声音被你咽了回去，却没能完全藏住。
+<br><br>
+
+<<if hasSexStat("promiscuity", 2)>>
+<<link [[将腿微微张开|Robert Taxi Kiss 1]]>><<set $robertTaxiKissPath to 1>><<set $robertTaxiArousalLoop to 0>><</link>><<promiscuous2>><<kissvirginitywarning>>
+<br>
+<</if>>
+<<if hasSexStat("promiscuity", 3)>>
+<<link [[摸回去|Robert Taxi Caress Back]]>><<set $robertTaxiBackJump += 1>><<set $robertTaxiFightInit to 1>><</link>><<garousal>><<promiscuous3>>
+<br>
+<</if>>
+<<if hasSexStat("promiscuity", 4)>>
+<<link [[为其口交|Robert Taxi Oral 4]]>><<set $robertTaxiBackJump += 1>><<set $robertTaxiEnding to "oral">><<set $robertTaxiOralInit to 1>><<run RobertNPC?.snapshotNpcClothes?.(0, 'robertTaxiNpcClothesBackup')>><<set $robertTaxiWornBackup to clone($worn)>><<set $robertTaxiExposedBackup to $exposed>><</link>><<garousal>><<promiscuous4>>
+<br>
+<</if>>
+<<if $robertTaxiJump lt 4>>
+<<robertLewdOption [[继续|Robert Taxi Caress]] "count">>
+<</if>>
+<<robertOption [[结束|Robert Taxi Destination]]>>
+
+:: Robert Taxi Oral 4
+/* 【页面4】口交前的准备页 —— 【页面1】的【为其口交】的目标段落。
+ *
+ * 流程：Robert Taxi Caress【页面1】
+ *        → 本页【页面4】（俯身、脱掉他的裤子）
+ *        → Robert Taxi Oral Fight（只靠近口部的自愿遭遇战）
+ *        → Robert Taxi Caress Back Rest【页面3】（收场）
+ *        → Robert Taxi Destination（到达）
+ *
+ * ⚠️「阴茎 / 阴道」用**本 mod 自己的** <<robertGenitals>>，不是原版
+ *    <<npcGenitals>>：原版在「两个器官都有」时会把两个都印出来，
+ *    而需求是**阴茎优先** —— 有阴茎就只显示阴茎，只有阴道时才显示阴道。
+ *    实现与理由见 robert-ride-event.twee 里 robertGenitals 的说明。
+ * ⚠️ 裤子用 <<npcMakeNaked>> 直接脱掉 —— 这里正是它适用的场景：
+ *    本页的剧情就是「你脱掉他的裤子」，不需要玩家再去点脱衣行动，
+ *    所以不存在「脱了之后选项还在」的问题（那是循环战斗页才有的坑）。
+ *    寻欢洞也用同一个函数（npcgloryhole，npc-behaviour.twee:201）。
+ * ⚠️【页面1】点这个选项时已经设好：
+ *      $robertTaxiEnding = "oral"   → 到达页会走对应的收尾分支
+ *      $robertTaxiOralInit = 1      → 下一场遭遇战的一次性初始化守卫
+ *      $robertTaxiBackJump += 1     → 这条分支自己的计数 */
+
+你俯身趴下，双手撑在他座椅的两侧。
+<br>
+他看了你一眼，没有拦。皮带扣在安静的车厢里响了一声，你把他的裤子褪到膝弯，
+<<robertGenitals 0>> 就这样暴露在仪表盘的光里。
+<br>
+“你确定？”他问。可他的呼吸已经先回答了这个问题。
+<br>
+你把脸凑近，鼻尖几乎碰到那里。他握着方向盘的手指收紧了一下。
+<br><br>
+
+<<robertOption [[继续|Robert Taxi Oral Fight]]>>
+
+:: Robert Taxi Caress Back
+/* 【页面2】自愿遭遇战（只有手部参与）。
+ *
+ * ⚠️ 结构逐行照抄参考 mod 的自愿战斗：
+ *      harper-asylum.twee:929-959「Asylum Harper Night Visit Unbound Wake Combat」
+ *    ：
+ *      <<if $一次性守卫 is 1>>
+ *          <<set $一次性守卫 to 0>>
+ *          <<npc 具名NPC>><<person1>>
+ *          <<consensual>><<set $consensual to 1>>
+ *          <<maninit>>
+ *          <<set 场景数值>>
+ *      <</if>>
+ *      <<effects>><<effectsman>><<man>><<stateman>>
+ *      <<actionsman>>
+ *      <<if _combatend>> …结束… <<else>> …回跳本页… <</if>>
+ *
+ * ⚠️⚠️ 最关键的一点：<<npc X>><<person1>> **必须放在一次性守卫内**！
+ *
+ *    哈珀的具名 NPC 战斗每一处都是这样写的（我核对过他所有 <<npc …>> 调用：
+ *    凡是在战斗循环段落里的，全都在守卫内）。原因：
+ *
+ *      <<npc Robert>>（named-npcs.twee:806）
+ *        → <<initNNPCClothes>> / <<getNNPCClothes>>          (:850-854)
+ *        → <<npcClothes>>                                    (ingame.js:1632)
+ *        → <<npcEquipSet>>                                   (ingame.js:1599)
+ *        → 重新穿好整套衣服 ⇒ penis 被打回 "clothed"
+ *
+ *    也就是说：**每回合跑一次 <<npc Robert>>，就会把他的裤子穿回去一次**。
+ *    玩家脱掉 → 下一回合自动复原，永远脱不掉，手交类行动（要求
+ *    `$_target.penis is 0`）也永远出不来。
+ *
+ *    我之前的循环页把 <<npc Robert>><<person1>> 放在顶层、每回合都跑，
+ *    这就是「明明显示脱衣成功、penis 却还是 clothed」的真正原因。
+ *
+ * ⚠️ 具名 NPC 与随机路人是两套代码：路人是 <<generate1>> 建的，
+ *    具名 NPC 走 <<npc X>>，后者自带衣着初始化。所以不能照搬
+ *    <<generate1>><<person1>> 那种「每回合重设」的写法。
+ *
+ * ⚠️ 场景数值照抄 <<npcgloryhole>>（npc-behaviour.twee:192-202）与
+ *    哈珀自愿战斗：mouth 设 "speech_only" 表示嘴只说话、不参与性行为。 */
+<<if $robertTaxiFightInit is 1>>
+	<<set $robertTaxiFightInit to 0>>
+
+	<<set $consensual to 1>>
+	<<set $sexstart to 1>>
+	<<set $enemytype to "man">>
+	<<set $enemyno to 1>>
+	<<set $enemynomax to 1>>
+
+	/* 修正存档里残留的攻击类行动（原版 $actionDefaults 存在存档里不会自动迁移）。
+	   详见 modules/robert-actiondefaults.js */
+	<<run RobertNPC?.sanitizeConsensualActions?.()>>
+
+	<<npc Robert>><<person1>>
+
+	/* <<consensual>> 设的是 $trueconsensual / $consensualGuaranteed
+	   （base-system/widgets.twee:1684），那是引擎判断「是否两厢情愿」的依据，
+	   也是 combatSkillCheck 必定成功的条件（ingame.js:340）。 */
+	<<consensual>>
+	<<set $consensual to 1>>
+
+	<<maninit>>
+
+	<<set $position to "missionary">>
+	<<set $NPCList[0].stance to "top">>
+	<<set $NPCList[0].mouth to "speech_only">>
+	<<set $enemytrust to 100>>
+	<<set $enemyanger to 0>>
+	<<set $enemyarousalmax to 1000>>
+	<<set $enemyhealth to 600>>
+	<<set $enemyhealthmax to 600>>
+	<<set $lefttarget to 0>>
+	<<set $righttarget to 0>>
+
+	/* 本场是「只用手」的遭遇战：设守卫标志。
+	   <<robertGuardNpcPenis>> 会在每回合兜底，
+	   防止引擎的 <<penisinit>> 把罗伯特的生殖器凑到玩家阴部/阴茎上
+	   （那会占掉状态，导致【抓住肉棒】等手部行动消失）。
+	   详见 robert-guard.twee 的说明。 */
+	<<set $robertHandsOnly to 1>>
+
+	/* ⚠️ 记录玩家**进入遭遇战前**的衣着快照。
+	   遭遇战里玩家会脱掉/拉开衣服，而【页面3】的正文写着
+	   「两人将衣服重新穿好」—— 所以到那一页要把衣着还原到这个快照。
+	   用 clone() 深拷贝：$worn 每个槽位都是一个对象
+	   （name / state / integrity / 各种 exposed 标记），
+	   直接赋引用会让恢复后再改动时回写快照。
+	   原版同样用 clone($worn) 做衣着快照，见
+	   overworld-town/loc-school/changing-rooms-widgets.twee:9。 */
+	<<set $robertTaxiWornBackup to clone($worn)>>
+	<<set $robertTaxiExposedBackup to $exposed>>
+
+	你把左手覆在他的手背上，指尖顺着他的指缝慢慢嵌进去。
+	<br>
+	“我叫罗伯特。”他说，眼睛还看着前面的路，“你记着这个名字就行。”
+	<br>
+	他没有抽开，反而像是被允许了什么似的，手上的力道松了一瞬，
+	随即又收回来 —— 这一次，是你按着他的手。
+	<br>
+	车厢里只剩下两个人的呼吸声，和计价器上跳动的数字。他侧过头看了你一眼，
+	没有说话，也没有减速 —— 车辆保持在行驶状态。
+	<br><br>
+<</if>>
+<<set $consensual to 1>>
+
+/* ⚠️ 每回合把 $enemyanger 归零。
+ *
+ * 引擎的 <<penisinit>> / <<vaginainit>>（man-combat.twee:5890 / 6325）用
+ *     `$enemyanger + $rng`（$rng 是 1–100）
+ * 掷点决定对方的生殖器贴到哪里；掷到 171 以上就会执行
+ *     <<set $vaginause to "penis">><<set $NPCList[_n].penis to "vaginaentrance">>
+ * 即「阴茎悬在你阴道上」，那会占掉状态，
+ * 导致【抓住肉棒】/【玩弄小穴】/【揉弄阴蒂】不再生成。
+ *
+ * $enemyanger 由 <<brat>>（widgets.twee:407）与 <<defiance>>（:380）推高，
+ * 而玩家**每次脱他衣服**都会调 <<brat 1 $lefttarget>>（effects.twee:1352）。
+ * 自愿遭遇战里玩家做的是爱抚，本就不该积累怒气 —— 归零是还原语义。
+ * 归零后 `$enemyanger + $rng` 最高 100，永远落在安全分支。 */
+<<set $enemyanger to 0>>
+
+<<effects>>
+<<effectsman>>
+<<man>>
+<<stateman>>
+
+/* 兜底：万一仍被别的路径设脏，按回来。
+   只碰他阴茎的方向与玩家侧对应的占用状态，不动任何手部相关字段。 */
+<<robertGuardNpcPenis>>
+<br>
+<<actionsman>>
+
+/* ⚠️ 胜负必须在离开战斗前记下：战斗一结束 $enemyhealth / $enemyarousal
+      就会被清掉，到结算页再判断永远是「没打赢」。 */
+<<set $robertTaxiWon to ($enemyhealth lte 0 or $enemyarousal gte $enemyarousalmax)>>
+
+<<if _combatend>>
+<span id="next"><<link [[继续|Robert Taxi Caress Back Result]]>><<endcombat>><</link>></span><<nexttext>>
+<<else>>
+<span id="next"><<link [[继续|Robert Taxi Caress Back]]>><</link>></span><<nexttext>>
+<</if>>
+
+
+:: Robert Taxi Oral Fight
+/* 【口部遭遇战】自愿，只有嘴参与。
+ *
+ * 结构与 Robert Taxi Caress Back（手部那场）完全一致 —— 只改三处：
+ *   ① <<robertTaxiOralInit>> 守卫（而不是 $robertTaxiFightInit）
+ *   ② 场景配置：把对方的手屏蔽掉（"none"），嘴保持在玩家这边
+ *   ③ 守卫用 $robertMouthOnly 标志（robert-guard.twee 里多一段处理）
+ *
+ * ⚠️⚠️ <<npc X>><<person1>> 仍然必须在一次性守卫内 ——
+ *    理由与手部那场完全相同：<<npc Robert>> 每次调用都会重跑
+ *    <<npcClothes>> → <<npcEquipSet>>，把裤子重新穿回去。
+ *    详见手部那场页面顶部的说明。
+ *
+ * ⚠️ 裤子：本页的剧情前提就是「已经脱掉了」（【页面4】干的），
+ *    所以这里用 <<npcMakeNaked>> 直接保持脱掉状态，
+ *    不让玩家再去点脱衣行动。这正是寻欢洞的做法
+ *    （npcgloryhole，npc-behaviour.twee:201）。
+ *
+ * ⚠️ 只有嘴参与：把罗伯特的两只手设为 "none"。
+ *    原版范式见 <<npcfence>> / <<npcgloryhole>>（npc-behaviour.twee:192-209）。 */
+<<if $robertTaxiOralInit is 1>>
+	<<set $robertTaxiOralInit to 0>>
+
+	<<set $consensual to 1>>
+	<<set $sexstart to 1>>
+	<<set $enemytype to "man">>
+	<<set $enemyno to 1>>
+	<<set $enemynomax to 1>>
+
+	/* 修正存档里残留的攻击类行动（同手部那场）。 */
+	<<run RobertNPC?.sanitizeConsensualActions?.()>>
+
+	<<npc Robert>><<person1>>
+
+	<<consensual>>
+	<<set $consensual to 1>>
+
+	<<maninit>>
+
+	<<set $position to "missionary">>
+	<<set $NPCList[0].stance to "top">>
+	/* 只有嘴参与：屏蔽他的两只手（"none" = 该部位不参与）。
+	   ⚠️ 不要屏蔽 penis / vagina / chest —— 那些同时是玩家可针对的部位。 */
+	<<set $NPCList[0].lefthand to "none">>
+	<<set $NPCList[0].righthand to "none">>
+	<<set $NPCList[0].mouth to "speech_only">>
+	/* 裤子已经脱掉（【页面4】的剧情），保持脱掉状态。 */
+	<<run npcMakeNaked($NPCList[0], "lower")>>
+	<<set $enemytrust to 100>>
+	<<set $enemyanger to 0>>
+	<<set $enemyarousalmax to 1000>>
+	<<set $enemyhealth to 600>>
+	<<set $enemyhealthmax to 600>>
+	<<set $lefttarget to 0>>
+	<<set $righttarget to 0>>
+
+	/* 只靠近口部：设守卫标志（robert-guard.twee 里会额外处理嘴的方向）。 */
+	<<set $robertMouthOnly to 1>>
+
+	/* ⚠️⚠️ 开场就让引擎就位 —— 不要等 <<penisinit>> 掷点。
+	 *
+	 * 不设的话 <<penisinit>> 会按 `$enemyanger + $rng` 掷点，
+	 * 可能掷出「移动到你的双腿间，把阴茎对准你的阴道」那种分支，
+	 * 本场就变成阴道场景了。
+	 *
+	 * ⚠️⚠️ **必须按罗伯特的器官选对应的一组状态**（踩过的坑）：
+	 *    引擎的动作生成（actionsGeneration.twee）是**分派到不同 case** 的：
+	 *      · 阴茎：$mouthuse "penis" + 他的 penis "mouthentrance" + $mouthstate "entrance"
+	 *              → <<case "entrance">> 印 `<<npcPenis $index>> hovers in front of your mouth.`
+	 *      · 阴道：$mouthuse "othervagina" + 他的 vagina "mouth" + $mouthstate "othervagina"
+	 *              → <<case "othervagina">> 印 `<<combatPersons>> pussy presses against your lips.`
+	 *    范式见 man-combat.twee:6001（阴茎）与 :6371（阴道）。
+	 *
+	 *    第一版**无论性别都只设阴茎那一组**，于是「只有阴道」的罗伯特：
+	 *      $mouthstate = "entrance" 仍走阴茎分支，
+	 *      但 <<npcPenis>> 找不到阴茎 → 退回他的 penisdesc = "none"，
+	 *      正文就成了「Robert把她的 none 抵在你的嘴唇上。」—— 那个 none 就是这么来的。 */
+	<<set $robertMouthHasPenis to ($NPCList[0].penis isnot "none")>>
+	<<if $robertMouthHasPenis>>
+		<<set $mouthuse to "penis">>
+		<<set $NPCList[0].penis to "mouthentrance">>
+		<<set $mouthstate to "entrance">>
+	<<else>>
+		<<set $mouthuse to "othervagina">>
+		<<set $NPCList[0].vagina to "mouth">>
+		<<set $mouthstate to "othervagina">>
+	<</if>>
+	<<set $mouthtarget to 0>>
+	<<set $NPCList[0].location.genitals to "head">>
+	<<set $NPCList[0].location.head to 0>>
+
+	/* ⚠️ 关掉他的避孕套意图。
+	 *   不关的话 <<penisinit>> 的阴道分支会印出
+	 *   「罗伯特将粉色避孕套套在他的肉棒上。」——
+	 *   本场是口部场景，不该出现这句。
+	 *   （condomLevel 由玩家的游戏设置控制，这里只影响本场。） */
+	<<set $NPCList[0].condom.willUse to false>>
+
+	/* ⚠️ 玩家衣着的快照在【页面1】点【为其口交】时就已经记好了
+	   （见 Robert Taxi Caress 的那个 <<link>>）——
+	   因为【页面4】会脱掉罗伯特的裤子，口部遭遇战入场时已经晚了。
+	   这里不重复记录。 */
+
+	你把脸埋进他的两腿之间，鼻息喷在他皮肤上。
+	<br>
+	“慢一点。”他说，声音比平时紧。
+	<br>
+	他的一只手抬起来，像是要按住你的后脑，又停住了，最后只是搭在座椅靠背上。
+	<br><br>
+<</if>>
+<<set $consensual to 1>>
+
+/* 每回合把 $enemyanger 归零 —— 与手部那场同理：
+   引擎用 `$enemyanger + $rng` 掷点决定对方的生殖器贴到哪里，
+   不归零会爬到把生殖器对到玩家身上的高位。 */
+<<set $enemyanger to 0>>
+
+<<effects>>
+<<effectsman>>
+<<man>>
+<<stateman>>
+
+/* 兜底守卫。$robertMouthOnly 时它还会把对方生殖器从玩家的
+   阴部/阴茎上撤下来，只允许停在口部方向。 */
+<<robertGuardNpcPenis>>
+<br>
+<<actionsman>>
+
+/* 本场的「赢」= 他射了（性奋到顶）。与手部那场同一个判断式，
+   过到结算页用。 */
+<<set $robertTaxiWon to ($enemyhealth lte 0 or $enemyarousal gte $enemyarousalmax)>>
+
+/* 出口与手部那场**完全一致**：战斗 → 结算页 → 【页面3】 → 目的地。 */
+<<if _combatend>>
+<span id="next"><<link [[继续|Robert Taxi Caress Back Result]]>><<endcombat>><</link>></span><<nexttext>>
+<<else>>
+<span id="next"><<link [[继续|Robert Taxi Oral Fight]]>><</link>></span><<nexttext>>
+<</if>>
+
+
+:: Robert Taxi Caress Back Result
+/* 【页面2】的战斗结算。
+ *
+ * ⚠️ 三个坑（都已在代码里处理）：
+ *   1. 胜负由 $robertTaxiWon 带过来 —— 战斗系统会在结束时清掉
+ *      $enemyhealth / $enemyarousal，不能在这里重新判断。
+ *   2. 原版 <<endevent>> 内部会把自愿标记清成 0（end.twee 的
+ *      <<endevent>> 段落里），所以要**在它之后**重新置 1，
+ *      否则后续段落会被当成非自愿。
+ *   3. <<endevent>> 已经清掉遭遇 NPC（<<endnpc>>），
+ *      必须重新 <<npc Robert>> 才能继续用罗伯特的身份 ——
+ *      哈珀 mod 的结算段落也是这么写的。 */
+<<set $outside to 0>>
+<<endevent>>
+<<set $consensual to 1>>
+<<npc Robert>><<person1>>
+<<effects>>
+
+<<if $robertTaxiWon>>
+	他的呼吸乱了一拍，手上的力道松开，垂回方向盘上。
+	<br>
+	“……你赢了。”他低声说，像是把这句话当成一个事实，而不是一句认输。
+	<br>
+	他咳了一声，把车窗降下一指宽，夜里的冷风灌进来一点。
+	<br>
+	“手劲不小。”他说。
+	<br>
+<<else>>
+	他按住你的手腕，力气不大，却稳得让你动不了。
+	<br>
+	“够了。”他说。这两个字不重，但车厢里的空气还是沉了下来。
+	<br>
+	他松开你，把视线放回前方的路面。
+	<br>
+	“再往前就要到路口了。”他说，“我总不能一边开车一边由着你。”
+<</if>>
+<br>
+车还在往前开。窗外的街灯一盏接一盏地退到身后。
+<br><br>
+
+/* 战斗收尾的数值结算。
+ *
+ * 遭遇战结束后他的性欲**下降**（他释放了）：
+ *   · 手部路线：lust -2  → 提示 <<lllust "Robert">>（两个减号）
+ *   · 口部路线：lust -3  → 提示 <<llllust "Robert">>（三个减号）
+ *
+ * ⚠️⚠️ **提示的符号个数 = 数值幅度**（本 mod 的书写规范）——
+ *    所以这里不能用「先 +2 再 -10 / -20 凑净变化」的老写法：
+ *    那样净变化是 -8 / -18，根本没有对应的提示变体（原版最多 3 档）。
+ *    现在直接把净变化写成 1–3 档，数值与提示天然一致。
+ *
+ * ⚠️「小于 0 就归 0」由 RB.addStat → RB.setStat 里的
+ *    `Math.max(range[0], …)` 负责（lust 的范围是 0–100），
+ *    不需要在这里再写一次钳制 —— 写两处反而容易只改一处。
+ *    另见 modules/robert-stats.js 的 setStat。 */
+<<if $robertTaxiEnding is "oral">>
+	<<run RobertNPC?.addStat?.('lust', -3)>><<llllust "Robert">>
+<<else>>
+	<<run RobertNPC?.addStat?.('lust', -2)>><<lllust "Robert">>
+<</if>>
+
+<<robertOption [[继续|Robert Taxi Caress Back Rest]]>>
+
+
+:: Robert Taxi Caress Back Rest
+/* 【页面3】战斗收场。
+ *
+ * 位置：结算页 → 本页 → 到达目的地。
+ *      （$robertTaxiEnding 的收尾文本在 Robert Taxi Destination 里，
+ *        按 "swing" / 保持不动 分支。）
+ *
+ * ⚠️ 本页**不**再调 <<endevent>> —— 结算页已经调过了，
+ *    重复调用会二次清空遭遇 NPC。这里只用 <<effects>> 收尾。
+ * ⚠️ 保持自愿标记：结算页重申过一次，这里再重申，
+ *    避免后续段落被当成非自愿。 */
+<<set $consensual to 1>>
+<<effects>>
+
+/* ⚠️ 恢复玩家的衣着到本场开始前的状态。
+ *
+ * 本页正文写着「两人将衣服重新穿好」，而遭遇战里玩家会把衣服
+ * 脱掉 / 拉开（那些修改都写在 $worn 里），所以这里把它还原。
+ *
+ * 用 clone() 再深拷贝一次，而不是直接赋引用：
+ * 否则以后再改动 $worn 时会回写到快照里，
+ * 下次进本场就会“恢复”到一个被污染过的状态。
+ *
+ * ⚠️ 快照变量用完即清，免得残留到下一场。
+ * ⚠️ 罗伯特的衣着不在这里处理 —— 结算页已经调了
+ *    <<npc Robert>>，它会按他自己的 outfits 重新穿好。 */
+<<if $robertTaxiWornBackup isnot undefined>>
+	<<set $worn to clone($robertTaxiWornBackup)>>
+	<<unset $robertTaxiWornBackup>>
+	/* <<exposure>> 是原版宏（base-system/widgets.js:722 DefineMacro），
+	   重算 $exposed —— 衣服穿回去之后暴露等级必须跟着更新，
+	   不能沿用遭遇战里的旧值。
+	   ⚠️ 不要去设 $exposed：它是推导值，直接写会与 $worn 不一致。 */
+	<<exposure>>
+	<<unset $robertTaxiExposedBackup>>
+<</if>>
+
+/* 罗伯特的衣着：还原到【页面1】点【为其口交】之前的状态。
+   ⚠️ 为什么快照必须记在【页面1】：<<npcEquipSet>>（ingame.js:1599）只按
+      outfit 重置衣服，抹掉剧情里造成的变化；而【页面4】会脱掉他的裤子，
+      若快照记在遭遇战入场，恢复出来就是「裤子脱着」，与正文矛盾。
+   ⚠️ restoreNpcClothes 只在**确实有差别**时改动并返回 true，
+      所以手部路线（没用 <<npc Robert>> 重设过衣着差异）不会多出提示。
+   详见 modules/robert-npc-clothes.js。 */
+<<if RobertNPC?.restoreNpcClothes?.(0, 'robertTaxiNpcClothesBackup') is true>>
+	<<set $_clothesbr to true>>
+	他先把自己的衣服理好，才伸手替你拉平衣领。
+	<br>
+<</if>>
+
+两人缓缓的喘着粗气，罗伯特将这缓慢的停在路边，两人将衣服重新穿好，
+罗伯特亲吻了你的额头。
+<br>
+<<if $robertTaxiEnding is "oral">>
+	他先替你把嘴角擦干净，动作很轻，像是怕弄疼你。
+	<br>
+	“抬一下头。”他把你的下巴托起来，看了看，才松开手，
+	“下次记得换气。”
+<<else>>
+	“到家之前别再摸我了。”他说，声音里没有多少责备的意思，
+	“我要是再分心，明天就得去修车。”
+<</if>>
+<br>
+你躺在座位上享受着高潮之后的余韵。
+<br>
+他把外套从后座捞过来，随手盖在你腿上，然后重新将车辆启动，向目的地行去。
+<br><br>
+
+/* ⚠️ 本页的出口**两条路线相同**（都是结算页 → 本页 → 目的地）：
+   经过本页时结算页已经走过了，所以这里直接去目的地。 */
+<<robertOption [[继续|Robert Taxi Destination]]>>
+
+:: Robert Taxi Kiss 1
+/* 【页面2】
+   进入瞬间的属性结算（需求指定）：
+     · 罗伯特的性欲 +1（走 JS 接口，不用 <<npcincr>>，见 README §5.1）
+     · 性技能：小穴 / 阴茎 数值 +2（按玩家实际有的器官给）
+     · PC 性奋 +200（原始值，上限 $arousalmax = 10000）
+     · 若口腔童贞还在则失去（该情形为两厢情愿）
+   文本里的亲吻动作同时意味着失去初吻，所以一并处理 ——
+   【页面1】的选项上已经用 <<kissvirginitywarning>> 提示过了。 */
+<<set $robertTaxiEnding to "kiss">>
+
+<<run RobertNPC?.addStat?.('lust', 1)>>
+
+<<if $player.vaginaExist>><<set $vaginalskill += 2>><</if>>
+<<if $player.penisExist>><<set $penileskill += 2>><</if>>
+
+<<arousal 200>>
+
+<<if $player.virginity.oral is true>>
+	<<set $player.virginity.oral to false>>
+<</if>>
+<<if $player.virginity.kiss is true>>
+	<<set $player.virginity.kiss to false>>
+<</if>>
+
+你慢慢的将腿张开，罗伯特察觉到你的动作，立刻兴奋起来。
+<<glust "Robert">>
+<br>
+“这可是你自己选的。”他说。
+<br>
+他把车缓慢停在路边，熄了火。路灯的光从挡风玻璃斜斜地照进来，
+在他侧脸上切出一道明暗分界。
+<br>
+“看着我。”他说。
+<br>
+随后他将你搂在怀中，嘴唇贴向你的面部。一只手伸向你的两腿之间，
+慢慢的贴向你的阴部，缓慢揉搓起来。
+<br><br>
+
+<<robertArousalOption [[继续|Robert Taxi Kiss 2]] 200>>
+
+:: Robert Taxi Kiss 2
+/* 【页面3】抚摸页。
+   点【继续】→ 淫乱判定 + 性奋 +500，回到本页。
+   性奋达到上限 $arousalmax 时，换成【高潮】→ Robert Taxi Kiss Climax。
+
+   ⚠️ 这里**不**调 <<orgasm>>，也不 <<goto>>：
+      高潮放在独立的结果页上（原版惯例，见 passout-scenes.twee:1966），
+      结果页结尾直接进后续剧情。 */
+<<set $robertTaxiArousalLoop to $robertTaxiArousalLoop ?? 0>>
+<<robertTaxiLewd 2>>
+
+罗伯特的手有节奏的轻柔你的阴部，时而用力，时而轻柔，时而加快，时而减慢。
+<br>
+“你抖了。”他贴着你的耳朵说，“别忍着。”
+<br>
+<br>
+你靠在他肩上，手指攥着他的衣袖。车窗上蒙了一层薄雾，
+把外面的街灯晕成一小团一小团的光斑。
+<br>
+“这条街我每晚上要过四趟。”他的声音比刚才低，“从没觉得它这么长。”
+<br><br>
+
+<<if $arousal gte $arousalmax>>
+<<robertOption [[高潮|Robert Taxi Kiss Climax]]>>
+<<else>>
+<<robertArousalOption [[继续|Robert Taxi Kiss 2]] 500>>
+<</if>>
+
+:: Robert Taxi Kiss Climax
+/* 高潮页 —— 就是原版的「高潮时触发的页面」。
+   <<orgasm>> 是 base-system/orgasm.twee 里的 inline 宏，
+   原版没有单独的 Orgasm 段落可跳，所以就地调用它。
+   它自己会印出粉色提示（orgasm.twee:384「你因突然的释放而颤抖」）。
+
+   ⚠️ 高潮之后**只有一个【继续】直接进【页面4】**，不要插不应期循环。
+      <<orgasm>> 会把 $orgasmdown 设成 3；本事件不调 <<effects>>，
+      那个值不会自己递减，所以这里归零，免得残留影响后续判断。 */
+<<orgasm>>
+<<set $orgasmdown to 0>>
+
+你的身体绷紧了。视线一片空白，只能听见自己血液冲击耳膜的声音，
+还有罗伯特在耳边压低的呼吸。你抓着他的手，指甲几乎陷进他的皮肤里。
+<br>
+“别怕。”他的声音从很远的地方传过来，“我在这儿。”
+<br>
+那阵浪潮持续了很久，久到你分不清自己有没有发出声音。
+<br>
+好一会儿，你才重新看清车顶。
+<br><br>
+
+<<robertOption [[继续|Robert Taxi Kiss 3]]>>
+
+:: Robert Taxi Kiss 3
+/* 【页面4】收尾，之后回到 Robert Taxi Destination 真正抵达。 */
+<<set $robertTaxiEnding to "kiss">>
+
+罗伯特的手慢慢停止，两张嘴唇分离，中间拉出一条银丝。
+<br>
+两人头部相抵，嘴里喘着粗气，额头上分泌着细密的汗珠。
+<br>
+“你嘴唇在抖。”他说。
+<br>
+之后罗伯特坐回自己的座椅上。他拧开一瓶水喝了两口，把瓶子递给你，
+<br>
+“喝点。”他说，“我可不想到地方了还得把你抱下去。”
+<br>
+在休息一会儿后，重新发动汽车，向目的地行驶而去。
+<br><br>
+
+<<robertOption [[继续|Robert Taxi Destination]]>>
+
+:: Robert Taxi Destination
+/* 事件收尾 + 真正抵达。
+   $robertTaxiEnding 的取值：
+     ""      → 保持不动路线（Slow Down 之后任何一步离开都算）
+     "swing" → 摆动腿部远离 / 抵抗
+     "kiss"  → 走完了亲吻分支（属性已在各页结算，这里**不重复给**）
+   ⚠️ 到达按钮只能用 <<robertTaxiArriveLink>>，不要用原版 destination 系列。 */
+<<set _robertTaxiIsRobert to ($robertTaxiDriver is "robert")>>
+
+<<if _robertTaxiIsRobert>>
+	罗伯特收回手，重新握在方向盘上，指尖在皮革上留下一点湿痕。
+	<br>
+	他没有看你，也没有说话，只是把视线重新放回前方的路面。出租车加速，
+	两旁的街景重新连成一条模糊的光带。
+	<br>
+	“到了。”他把车停稳，把计价器按停。
+	<br>
+	你解开安全带的时候，他忽然又说了一句：“要是下次还坐我的车，
+	就还坐前面。”
+	<br>
+	车在一个路口拐弯，减了速，最后靠着路边停了下来。很快你到达了目的地。
+	<br><br>
+	<<if $robertTaxiEnding is "swing">>
+		<<robertTaxiEndSwing>>
+	<<elseif $robertTaxiEnding is "" or $robertTaxiEnding is null>>
+		<<robertTaxiEndHold>>
+	<<elseif $robertTaxiEnding is "oral">>
+		/* 【为其口交】路线的收尾。
+		   ⚠️ "kiss" 路线**故意不在这里出现** —— 它在 Robert Taxi Kiss 3
+		      里已经自己收了尾，这里再写一遍会重复。 */
+		<<robertTaxiEndOral>>
+	<</if>>
+	<<run RobertNPC?.markMet?.()>>
+<<else>>
+	出租车稳稳地停在路边。
+<</if>>
+<<set $robertTaxiSeat to "">>
+<<set $robertTaxiKissPath to 0>>
+<br>
+<<robertTaxiArriveText>>
+<<robertTaxiArriveLink>>
+
+
+:: Robert Taxi Back Anger 1
+/* 【后座·页面2】后座事件 —— 他开口要你帮忙解决。
+ *
+ * 入口：Robert Taxi Seat 的后座分支（$robertTaxiSeat is "back"）。
+ *   ⚠️ 只有**恋人**（$robertRomance is true）才可能触发，且掷点 ≤ 10。
+ *      非恋人时该条件直接不成立 —— 与陌生司机流程完全一致（无事发生、正常到达）。
+ *   ⚠️ 掷点只在 Robert Taxi Seat 里做一次（本条线唯一的判定点），本页不重复判定。
+ *
+ * 出口：
+ *   【为其口交】（淫乱 ≥4 级才出现）→ Robert Taxi Oral Fight
+ *       **复用**副驾驶线的口部遭遇战页，不另建战斗页。
+ *       数值：dom +2、lust -2（点击时立即结算）
+ *       标记：$robertTaxiEnding = "oral"
+ *             → 遭遇战之后的 Robert Taxi Caress Back Result / Rest 会按
+ *               **口部路线**处理（结算 -3、收场正文走「下次记得换气」那一段），
+ *               即与副驾驶线【为其口交】的后续发展一致。
+ *       ⚠️⚠️ 衣物快照必须记在**这里**，不能等遭遇战入场（skill §6.5 ⚠️9）：
+ *             <<npc Robert>> 会按 outfit 重设他的衣服，而遭遇战里会
+ *             npcMakeNaked(lower) 脱掉他的裤子 —— 快照晚于那次改动就还原不回去。
+ *             记的是与副驾驶线同一组变量（同一次乘车只会跑其中一条路线，不会互相覆盖）。
+ *
+ *   【无事发生】→ Robert Taxi Back Anger 2【后座·页面3】
+ *       数值：dom -2、lust +2、rage +2（点击时立即结算）
+ *
+ * ⚠️ 本页两个出口都是离开，不需要一次性守卫，也不需要 <<npc Robert>>
+ *    （本页正文不引用任何 NPC 描述宏）。
+ * ⚠️ 颜色提示是 <<link>> 的**兄弟节点**，绝不放进链标（见 robert-tweak.twee 顶部说明）。
+ *
+ * ⚠️⚠️ 提示宏的**三条**铁律（本页两个选项就是范本，别再写错）：
+ *   1. **符号个数 = 数值幅度**（本 mod 的书写规范，见 skill）：
+ *        一个 + → <<gdom "Robert">> 且数值 +1
+ *        两个 + → <<ggdom "Robert">> 且数值 +2
+ *        两个 - → <<lldom "Robert">> 且数值 -2
+ *      所以需求方说「两个 +」时，是把**提示和数值一起**定下来，两边永远一致。
+ *   2. **参数是 NPC 名，不是数量**：<<gdom "Robert">>。
+ *      写成 <<glust 8>> 会渲染出「+ 8的性欲」—— 不报错，但一眼假。
+ *   3. **一个属性只给一个提示块**，不要靠叠块去凑幅度：
+ *      <<ldom>>＝−1、<<lldom>>＝−2、<<llldom>>＝−3 本身就是档位，
+ *      框架的 statChange 会按幅度重复符号（"- ".repeat(|amount|)）。
+ *      写成 <<lldom>><<lldom>><<ldom>> 会并排显示三个块、共 5 个减号。
+ *   4. 单次增减控制在 **1–3 档**（原版变体最多到 3）；超过 3 档没有对应变体。
+ */
+
+罗伯特把车靠向路边，停在一盏路灯下面。
+<br>
+他没有熄火，双手还搭在方向盘上，指节有一下没一下地敲着皮革。
+<br>
+“我跟你说件事。”他盯着前面的路，没有回头，“我最近火气很大。不是冲你，也不是冲谁 —— 就是憋着。”
+<br>
+他从后视镜里看了你一眼。那一眼停得比平时久。
+<br>
+“开夜车的都这样。”他说，“白天睡不踏实，晚上一直坐着，攒下来的东西没地方放。”
+<br>
+计价器还在跳。你从后座看见他的肩膀绷得很紧，衬衫的布料跟着呼吸一起一伏。
+<br>
+“你要是愿意，”他顿了顿，像是把这句话从嘴里挑出来，“帮我解决一下。”
+<br>
+“不愿意就当我没说。”他补了一句，声音低下去。
+<br><br>
+
+<<if hasSexStat("promiscuity", 4)>>
+<<link [[为其口交|Robert Taxi Oral Fight]]>><<set $robertTaxiEnding to "oral">><<set $robertTaxiOralInit to 1>><<run RobertNPC?.addStat?.('dom', 2)>><<run RobertNPC?.addStat?.('lust', -2)>><<run RobertNPC?.snapshotNpcClothes?.(0, 'robertTaxiNpcClothesBackup')>><<set $robertTaxiWornBackup to clone($worn)>><<set $robertTaxiExposedBackup to $exposed>><</link>><<promiscuous4>><<ggdom "Robert">><<lllust "Robert">>
+<br>
+<</if>>
+<<link [[无事发生|Robert Taxi Back Anger 2]]>><<set $robertTaxiEnding to "">><<run RobertNPC?.addStat?.('dom', -2)>><<run RobertNPC?.addStat?.('lust', 2)>><<run RobertNPC?.addStat?.('rage', 2)>><</link>><<lldom "Robert">><<gglust "Robert">><<ggrage>>
+<br>
+
+
+:: Robert Taxi Back Anger 2
+/* 【后座·页面3】后座事件 —— 他没能开口，只剩不爽。
+ *
+ * 入口：Robert Taxi Back Anger 1【后座·页面2】的【无事发生】。
+ *   ⚠️ dom -5 / lust +5 / rage +5 **已经在点击时结算过**（见【后座·页面2】的链接），
+ *      本页只负责表现与收尾，**不再改任何数值** —— 否则会重复扣一次。
+ *
+ * 出口：【继续】→ 到达目的地，事件结束。
+ *   本页直接给 <<robertTaxiArriveText>> + <<robertTaxiArriveLink>>，
+ *   **不经过 Robert Taxi Destination**：
+ *   那一页的收尾文本与数值分支都是**副驾驶专属**的
+ *   （里面有「要是下次还坐我的车，就还坐前面」这类台词），
+ *   后座事件走到那里会印出明显矛盾的台词。
+ */
+
+车里安静了一会儿。
+<br>
+“行。”他先开的口，声音很平，“当我没说过。”
+<br>
+他重新点火，把车并回车道。转向灯亮了三下才灭，中间谁都没有说话。
+<br>
+后视镜里，他的下颌绷得很紧。前面路口的红灯亮起来时，他没有像刚才那样敲手指，
+只是盯着那盏灯，等它变绿。
+<br>
+有些话没有说出口，也没有被放下 —— 只是被压回了原处。
+<br><br>
+
+<<set $robertTaxiSeat to "">>
+<<robertTaxiArriveText>>
+<<robertTaxiArriveLink>>
+
+
+:: Robert Taxi Back Find 1
+/* 【后座·页面4】后座事件（二）—— 座位上好像有什么东西。
+ *
+ * 入口：Robert Taxi Seat 的后座分支的**另一个出口**。
+ *   ⚠️ 判定顺序（都在 Robert Taxi Seat 那一个地方）：
+ *        恋人 且 掷点 ≤ 10  → Robert Taxi Back Anger 1【后座·页面2】（他开口那条）
+ *        其余（非恋人 100% / 恋人 90%）→ **本页**
+ *      也就是说：坐后座只要没触发「他最近有些火大」，就一定会进这里。
+ *   ⚠️ 跳段前 $robertTaxiSeat / $robertTaxiEnding 已经在 Robert Taxi Seat 里清过了，
+ *      所以本页不会因为返回而重复触发。
+ *
+ * 出口：
+ *   【摸索一下】→ Robert Taxi Back Find 2【后座·页面5】（掷 80/20 决定摸不摸得到钱）
+ *   【无事发生】→ Robert Taxi Back Find End（【无事发生】出口）→ 到达，事件结束
+ *
+ * ⚠️ 本页两个出口都是离开，不需要一次性守卫，也不需要 <<npc Robert>>。
+ */
+
+车汇进主路之后，你把额头抵在车窗上。路灯、招牌、晚归的人影一格格往后退，
+像有人在外面翻一本翻得很快的书。
+<br>
+你往后挪了挪身子，想坐得舒服些 —— 就在这时，你感到座位上有什么东西。
+<br>
+硬硬的一小块，隔着布料顶在你腿下。它随着车身的晃动轻轻挪了一下，又停住了。
+<br>
+不是座椅的接缝，也不是安全带的扣子。你没有伸手去碰，只是先低头看了一眼。
+<br><br>
+
+<<link [[摸索一下|Robert Taxi Back Find 2]]>><</link>>
+<br>
+<<link [[无事发生|Robert Taxi Back Find End]]>><</link>>
+<br>
+
+
+:: Robert Taxi Back Find 2
+/* 【后座·页面5】后座事件（二）—— 摸到了什么。
+ *
+ * 入口：Robert Taxi Back Find 1【后座·页面4】的【摸索一下】。
+ *
+ * 掷点（进入本页时结算一次）：
+ *   80% → 什么也没有
+ *   20% → 摸到钱，金额 random(1, 50)（**英镑**）
+ *
+ * ⚠️ 钱用原版 <<moneyGain N>>，它的参数是**英镑**，内部会 ×100 变成便士：
+ *      <<moneyGain 30>> → V.money += 3000 → 显示 formatMoney(3000) = 「£30」
+ *      （formatMoney 的整数部分不带小数，ingame.js:2753）
+ *    不要自己写 <<money 3000>> —— 那样只加钱不显示金额，
+ *    而且单位写错（写成 <<money 30>> 只有 £0.30）不会报任何错。
+ * ⚠️ 掷点用**临时变量**就够了：本页只有一次渲染，不跨段落（跨段落必须用 $，见 README §5.3）。
+ *
+ * 出口：【下车】= <<robertTaxiArriveLink "下车">> → 到达目的地，事件结束。
+ */
+
+<<set _rtFindRoll to random(1, 100)>>
+<<set _rtFindMoney to (_rtFindRoll lte 20 ? random(1, 50) : 0)>>
+
+你把手指探进坐垫的缝隙里，指腹贴着布料来回摸索。
+<br>
+<<if _rtFindMoney gt 0>>
+	你摸到了：<<moneyGain _rtFindMoney>>，你感到十分开心。这时你看到到站了。
+<<else>>
+	你什么都没有摸到，这时你看到到站了。
+<</if>>
+<br><br>
+
+<<set $robertTaxiSeat to "">>
+<<robertTaxiArriveText>>
+<<robertTaxiArriveLink "下车">>
+
+
+:: Robert Taxi Back Find End
+/* 【后座·页面4】的【无事发生】出口 —— 到达，事件结束。
+ *
+ * 为什么要单独一页：<<robertTaxiArriveText>> / <<robertTaxiArriveLink>>
+ *   必须在**玩家已经做出选择之后**才渲染。把它们写在【后座·页面4】里，
+ *   选了【摸索一下】的玩家也会看到「你到达了目的地」这一段。
+ *   ⚠️ 不要为了省一页把到达文本挪回【后座·页面4】。
+ *
+ * ⚠️ 本页不改任何数值（【无事发生】本来就是不加不减的沉默选项）。
+ * ⚠️ 到达链接的按钮文字传 "下车"，与【后座·页面5】保持一致
+ *    （<<robertTaxiArriveLink>> 的参数是按钮文字，省略时为「继续」）。
+ */
+
+你没有理会那点触感，只是把手放回膝上，重新望向窗外。
+<br>
+路灯一段一段地掠过去，等你再想起座位底下那件事的时候，车已经在减速了。
+<br><br>
+
+<<set $robertTaxiSeat to "">>
+<<robertTaxiArriveText>>
+<<robertTaxiArriveLink "下车">>
+
+

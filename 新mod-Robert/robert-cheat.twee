@@ -1,0 +1,135 @@
+:: Robert Cheat Widgets [widget]
+/* ===========================================================================
+ * 罗伯特在「作弊菜单 → NPC 栏」里的控件
+ * ===========================================================================
+ *
+ * 这一整块由 boot.json 的 TweeReplacer 补丁 2 插入到原版
+ * <<widget "cheats-npcs">>（base-system/overlays/cheats.twee:1209）里，
+ * 位置是 Primary Relationships 分区的末尾。
+ *
+ * ⚠️ 为什么不直接覆盖 <<cheats-npcs>>：
+ *    它有一千多行，整体复制会长期跟着原版漂移，也会和其他 mod 抢同一个
+ *    widget。这里只往它内部插一行 <<robertCheatNpc>> 调用。
+ *
+ * ⚠️ 属性读写一律走 RobertNPC 的接口（RB.npcStat / RB.npcSetStat）：
+ *    它们读写的正是 V.NPCName 里那个对象，与原版 <<numberStepper>> 直接
+ *    读写 `C.npc.Robin.love` 是同一套做法（原版亦如此，
+ *    见 cheats.twee:1237）。走接口的好处是钳制范围只有一处定义，
+ *    且 NPC 还没被框架注入时会安静返回默认值，不会抛异常。
+ * =========================================================================== */
+
+<<widget "robertCheatNpc">>
+	<<if RobertNPC?.npcStat>>
+		<div class="settingsToggleItemWide">
+			<span class="gold"><<robertName>></span>
+
+			/* ---- 出现规则开关 ----
+			   默认关闭 = 只在周二 / 周五出现 10%
+			   打开     = 必定出现 100% */
+			<span id="robertcheatdesc" class="description">
+				<<= RobertNPC.taxiRuleText()>>
+			</span>
+			<<numberStepper "<<= RobertNPC.t('RobertNPC.cheat.alwaysStepper')>>" `V.settings.robertAlwaysDriver === true` {
+				percentage: false,
+				min: 0,
+				max: 1,
+				callback: value => { V.settings.robertAlwaysDriver = (value === 1) }
+			}>>
+			<br>
+
+			/* ---- 出租车判定实时状态 ----
+			   检查「总是出现」开关到底有没有生效。只读，不掷骰。 */
+			<<set _rtGates to RobertNPC?.taxiGateReport?.() ?? []>>
+			<<for _rtGate range _rtGates>>
+				<span class="<<= _rtGate.ok ? 'green' : 'red'>>">
+					<<= _rtGate.ok ? '✔' : '✘'>> <<= _rtGate.text>>
+				</span>
+				<br>
+			<</for>>
+			<br>
+
+			/* ---- 名字汉化状态 ----
+			   症状「名字全是英文而其他文字正常」时，一眼看出卡在哪一环：
+			   ModI18N 的 NPC_CN_NAME / 框架语言表 / ModI18N 的职业词表。
+			   只读，不写任何东西。详见 framework.js 的 ensureI18nNameFix。 */
+			<<set _rnGates to RobertNPC?.nameReport?.() ?? []>>
+			<<if _rnGates.length>>
+				<span class="gold">名字显示</span>
+				<br>
+				<<for _rnGate range _rnGates>>
+					<span class="<<= _rnGate.ok ? 'green' : 'red'>>">
+						<<= _rnGate.ok ? '✔' : '✘'>> <<= _rnGate.text>>
+					</span>
+					<br>
+				<</for>>
+			<</if>>
+			<br>
+
+			/* ---- 四个属性 ----
+			   范围与 RobertNPC.STAT_LIMITS 一致（都是 0–100）。
+			   rage（怒气）越大越糟，所以 reverse: true 让颜色反向。 */
+			<<numberStepper "<<symbol love>> <<= RobertNPC.t('RobertNPC.stat.love')>>" `RobertNPC.npcStat('love')` {
+				min: 0, max: 100,
+				callback: value => { RobertNPC.npcSetStat('love', value) }
+			}>>
+			<<numberStepper "<<symbol lust>> <<= RobertNPC.t('RobertNPC.stat.lust')>>" `RobertNPC.npcStat('lust')` {
+				min: 0, max: 100,
+				callback: value => { RobertNPC.npcSetStat('lust', value) }
+			}>>
+			<<numberStepper "<<symbol dominance>> <<= RobertNPC.t('RobertNPC.stat.dom')>>" `RobertNPC.npcStat('dom')` {
+				min: 0, max: 100,
+				callback: value => { RobertNPC.npcSetStat('dom', value) }
+			}>>
+			<<numberStepper "<<symbol rage>> <<= RobertNPC.t('RobertNPC.stat.rage')>>" `RobertNPC.npcStat('rage')` {
+				min: 0, max: 100, reverse: true,
+				callback: value => { RobertNPC.npcSetStat('rage', value) }
+			}>>
+			<br>
+
+			/* ---- 性器官（= 性别） ----
+			   按需求做成**原版「身体」设置那种单选按钮**，而不是数字步进器：
+			   阴茎 / 阴道 / 两者都有 → 男 / 女 / 双性。
+			   ⚠️ 范式照抄 base-system/settings.twee:869-871 + 877-885：
+			      按钮只负责写变量（<<radiobutton "$robertGenitals" …>>），
+			      副作用靠**自己挂 change 处理器** —— 因为原版 <<radiobutton>>
+			      没有回调钩子（<<numberStepper>> 才有 callback）。
+			   ⚠️ $robertGenitals 是普通存档变量，进入本面板时与真实性别对齐，
+			      所以读档/切换后按钮状态总是正确的。 */
+			<<set $robertGenitals to RobertNPC?.gender?.() ?? "m">>
+			<div class="settingsToggleItem" id="robertgenitals">
+				<span class="gold"><<= RobertNPC.t('RobertNPC.cheat.genitals')>>：</span><br>
+				<<for _rgOpt range RobertNPC?.GENITAL_OPTIONS ?? []>>
+					<<if _rgOpt.value isnot "m">>| <</if>><label><<= _rgOpt.cn>> <<radiobutton "$robertGenitals" _rgOpt.value autocheck>></label>
+				<</for>>
+			</div>
+			<<run
+				$(() => {
+					$('#robertgenitals input[type="radio"]').on('change', () => {
+						RobertNPC?.applyGenitals?.(V.robertGenitals);
+					});
+				})
+			>>
+
+			/* ---- 表白事件触发条件一览 ----
+			   把条件逐条摊开：事件「没出现」时一眼能看出卡在哪一条，
+			   不用靠猜。详细说明见 modules/robert-ride.js 的 rideGateReport。
+			   ⚠️ 这一块是只读的，不掷点、不改存档。 */
+			<<set _rrGates to RobertNPC?.rideGateReport?.() ?? []>>
+			<<if _rrGates.length>>
+				<span class="gold">牛津街表白事件</span>
+				<br>
+				<<for _rrGate range _rrGates>>
+					<span class="<<= _rrGate.ok ? 'green' : 'red'>>">
+						<<= _rrGate.ok ? '✔' : '✘'>> <<= _rrGate.text>>
+					</span>
+					<br>
+				<</for>>
+				<<link "立即触发一次">>
+					<<set $robertRideChecked to "">>
+					<<set $robertRideCooldownUntil to undefined>>
+					<<goto [[Robert Ride 1]]>>
+				<</link>>
+			<</if>>
+		</div>
+	<</if>>
+<</widget>>

@@ -1,0 +1,493 @@
+:: Robert Taxi
+/* ---------------------------------------------------------------------------
+ * RobertNPC —— 出租车：上车与目的地选择
+ *
+ * 设计要点（为什么这么做，改之前请先读）：
+ *   1. 出租车复用了原版公交的「目的地渲染」与「到达」机制：
+ *        - <<destination>>          渲染目的地链接（原版 Widgets Destination）
+ *        - <<robertTaxiArriveLink>> 到达按钮（本 mod 自己的 widget）
+ *      因为需求是「出租车与公交车具有同样的功能」，所以 $bus 沿用原版变量，
+ *      不另造一套目的地系统，这样街外事件、地图、快速跳转全部自动一致。
+ *
+ *      ⚠️ 到达**不要**用原版的 <<destination5>> / <<destinationeventend>>：
+ *         它们会往 $link_table 多塞一条旅行链接（例如「牛津街 (0:05) (学校)」），
+ *         再生成一个 Next 按钮，导致页面出现两个效果相同的选项。
+ *         详见 "Robert Taxi Event Header" 段落顶部的说明。
+ *
+ *   2. 时间与公交完全一致：
+ *        buswait 里那行「等待出租车 (0:02)」   等车 2 分钟（与公交的 0:02 相同）
+ *        目的地链接                            车程 5 分钟（与公交的 0:05 相同）
+ *
+ *   3. 车费 £5 = 500 文（原版公交 £1 = 100 文）。
+ *      原版 <<money>> 在余额不足时会抛异常，所以这里先判断 $money gte 500 再扣款。
+ *
+ *   widget 定义集中在 "Robert Taxi Widgets" 与 "Robert Taxi Event Header"
+ *   两个带 [widget] 标签的段落里，不会被渲染。
+ * ------------------------------------------------------------------------- */
+
+/* 先清干净上一次的目的地：本段落的 <<destination>> 在玩家点选之前就会执行，
+   如果 $bus 还留着上一次的值，会多渲染一遍旧的目的地链接。
+   用 <<unset>> 而不是 <<set $bus to "">>，避免在存档历史里多留一个无用变量。 */
+<<unset $bus>>
+<<set $robertTaxiDriver to "">>
+
+你上了出租车。价£5。
+<br>
+<<if $money gte 500>>
+
+	住宅区
+	<br>
+
+	<<domusicon>><<link [[乘车前往多姆斯街（家）(0:05)|Robert Taxi Seat]]>><<set $bus to "domus">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<barbicon>><<link [[乘车前往巴布街（工作室）(0:05)|Robert Taxi Seat]]>><<set $bus to "barb">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<danubeicon>><<link [[乘车前往多瑙街（宅邸区）(0:05)|Robert Taxi Seat]]>><<set $bus to "danube">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<wolficon>><<link [[乘车前往狼街（神殿）(0:05)|Robert Taxi Seat]]>><<set $bus to "wolf">><<money -500 "taxi">><</link>>
+	<br><br>
+
+	商业区
+	<br>
+
+	<<highicon>><<link [[乘车前往高街（购物中心）(0:05)|Robert Taxi Seat]]>><<set $bus to "high">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<connudatusicon>><<link [[乘车前往康努达图斯街（夜店区）(0:05)|Robert Taxi Seat]]>><<set $bus to "connudatus">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<clifficon>><<link [[乘车前往悬崖街（咖啡馆）(0:05)|Robert Taxi Seat]]>><<set $bus to "cliff">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<nightingaleicon>><<link [[乘车前往南丁格尔街（医院）(0:05)|Robert Taxi Seat]]>><<set $bus to "nightingale">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<starfishicon>><<link [[乘车前往海星街（海滩）(0:05)|Robert Taxi Seat]]>><<set $bus to "starfish">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<oxfordicon>><<link [[乘车前往牛津街（学校）(0:05)|Robert Taxi Seat]]>><<set $bus to "oxford">><<money -500 "taxi">><</link>>
+	<br><br>
+
+	工业区
+	<br>
+
+	<<elkicon>><<link [[乘车前往麋鹿街 (0:05)|Robert Taxi Seat]]>><<set $bus to "elk">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<mericon>><<link [[乘车前往梅尔街（码头）(0:05)|Robert Taxi Seat]]>><<set $bus to "mer">><<money -500 "taxi">><</link>>
+	<br>
+
+	<<harvesticon>><<link [[乘车前往收获街（酒馆）(0:05)|Robert Taxi Seat]]>><<set $bus to "harvest">><<money -500 "taxi">><</link>>
+	<br><br>
+
+	<<if $town_projects.road gte 4>>
+		森林
+		<br>
+		<<lakeicon>><<link [[乘车前往湖边 (0:05)|Robert Taxi Seat]]>><<set $forest to 0>><<set $bus to "lakebus">><<money -500 "taxi">><</link>>
+		<br><br>
+	<</if>>
+
+<<else>>
+
+	你的钱不够付车费。
+	<br><br>
+
+<</if>>
+
+<<destination>>
+
+
+:: Robert Taxi Seat
+/* 目的地已经选好、车费已经扣过。
+   职责：判定司机；若司机是罗伯特，则由 <<robertTaxiRobertDrive>> 给出座位选择。
+   【坐后座】会带着 $robertTaxiSeat = "back" 回到本段落，
+   由下面的后座分支决定进哪个后座事件。 */
+
+<<set $outside to 0>><<effects>>
+<<set $foresthunt to 0>>
+
+<<if $robertTaxiSeat is "back">>
+	/* 选了后座 —— 本分支**自成一体**：自己决定司机、自己走完，不再落到下面的通用分流。
+	   ⚠️⚠️ 关键：绝不能让「后座 + 罗伯特」走到 <<robertTaxiRobertDrive>> ——
+	      那会再打印一遍「又是罗伯特的车…」+ 再给一次性欲/爱意，
+	      并且**再出现一次座位选项**（死循环，数值每次都在涨）。
+	      <<robertTaxiRobertDrive>> 是**副驾驶专属**的首次见面/座位选择流程。
+	   【后座事件线】的判定就在下面这一处（本条线**唯一**的判定点）：
+	      · $robertRomance is true（**已是恋人**）→ 掷 1–100，≤ 10 触发
+	        「他最近有些火大」→ Robert Taxi Back Anger 1【后座·页面2】；
+	      · **其余一律**（非恋人 100% ／ 恋人另外 90%）→
+	        「座位上好像有什么东西」→ Robert Taxi Back Find 1【后座·页面4】。
+	      也就是说：坐后座**必然**进其中一条，不会再有「什么都不发生」的路径。
+	   $robertTaxiDriver 的含义（本分支）：
+	      · 恒为 "stranger" —— 两条后座事件都不改它，所以收尾不会走副驾驶那套
+	        文本与结算分支（Destination 只印一句平铺的到达文本）。
+	        两条事件的收尾各自成页，见 robert-taxi-event.twee。
+	   $robertTaxiSeat 的清理：**两个出口都在跳段前清**（要立刻跳段，
+	   Destination 不会再执行；不清的话任何原因回到本页都会重新掷骰）。
+	   ⚠️⚠️ 跳转必须用 <<goto "段落">>，**绝对不要**写 <<run Engine.play("…")>>：
+	      本段落此刻**正在渲染**，直接调 Engine.play 会立刻去渲染目标段落，
+	      随后本段落渲染收尾时又把自己的输出写进 #passages，
+	      **把目标页整页覆盖掉** —— 表现就是「点了选项后一整页空白，
+	      只有用历史回溯才看得到正确页面」。SugarCube 的 <<goto>> 内部是
+	          Wikifier.stopWikify = 2;
+	          setTimeout(() => Engine.play(p), Engine.minDomActionDelay)
+	      即「停掉本段落剩余渲染 + 把跳转推迟到当前 DOM 任务之后」，这才是安全写法。
+	      参考实现：哈珀 mod 全库都用 <<goto "…">>（见 harper-widgets.twee:81）。 */
+	<<set $robertTaxiDriver to "stranger">>
+	<<if $robertRomance is true and random(1, 100) lte 10>>
+		/* 恋人专属：10% 概率触发后座事件（一）「他最近有些火大」。
+		   ⚠️ 本页每次进入都重新掷骰，所以跳段前必须先把 $robertTaxiSeat 清掉，
+		      否则任何原因回到本页都会再掷一次（概率被放大）。 */
+		<<set $robertTaxiSeat to "">>
+		<<set $robertTaxiEnding to "">>
+		<<goto "Robert Taxi Back Anger 1">>
+	<<else>>
+		/* 其余情况：后座事件（二）「座位上好像有什么东西」。
+		   ⚠️ 这里**不再**调 <<robertTaxiStrangerDrive>> ——
+		      后座从此必然进事件（页面4/5），陌生司机那套文本只留给
+		      「司机本来就是陌生人」的普通车程。 */
+		<<set $robertTaxiSeat to "">>
+		<<set $robertTaxiEnding to "">>
+		<<goto "Robert Taxi Back Find 1">>
+	<</if>>
+<<else>>
+	<<if $robertTaxiSeat is "front">>
+		/* 已经选了副驾驶，司机必然是罗伯特，不再掷骰 */
+		<<set $robertTaxiDriver to "robert">>
+	<<else>>
+		<<set $robertTaxiDriver to (RobertNPC?.rollTaxiDriver?.() ? "robert" : "stranger")>>
+	<</if>>
+	<<if $robertTaxiDriver is "robert">>
+		<<robertTaxiRobertDrive>>
+	<<else>>
+		<<robertTaxiStrangerDrive>>
+	<</if>>
+<</if>>
+/* ⚠️ 这里**不要**调 <<destination5>> / <<destinationeventend>>：
+   它们会往 $link_table 塞一条多余的旅行链接（就是玩家看到的
+   「牛津街 (0:05) (学校)」那个多余选项），并且再生成一个 Next 按钮。
+   两者点击效果与页面里已有的【继续】完全一样，纯属重复。
+   到达按钮由 <<robertTaxiArriveLink>> 单独渲染。 */
+
+
+:: Robert Taxi Widgets [widget]
+/* ---------------------------------------------------------------------------
+ * RobertNPC —— 出租车 widget 集合
+ * 本段落带 [widget] 标签，不会被渲染。
+ * ------------------------------------------------------------------------- */
+
+/* 出租车图标。
+   因为 <<icon>> 宏会把路径固定拼成 img/misc/icon/<名字>，无法指向本 mod 自己的图片，
+   所以这里直接用 <img> 标签：ModLoader 的 HtmlTagSrcHook 会自动把 src 换成 mod zip 里的图。
+   当前用的是「新占位图片.png」的副本；换成正式图标时改这个路径
+   并同步 boot.json 的 imgFileList 与 framework.js 的 RB.IMG.icon。 */
+<<widget "robertTaxiIcon">><img src="img/占位图片.png" alt="出租车" class="icon" style="vertical-align:middle;"> <</widget>>
+
+/* 街上的「等待出租车」选项。
+   行为与 <<buswait>> 完全一致：同样等 2 分钟。
+   ⚠️ 本 widget 是覆盖原版 <<buswait>>（见 boot.json 的 TweeReplacer），
+      所以这里把原版那行公交链接也照抄了一遍，否则公交车会被顶掉。
+
+   ⚠️⚠️ 关键：那行公交链接**必须写汉化后的中文**「等待公交车」，不能写原版英文
+        "Wait for a bus"。
+        原因：ModI18N 的汉化替换先于本 mod 的 TweeReplacer 执行，
+        打完补丁后游戏里的文本已经是中文。第一版写成英文，导致：
+          （1）boot.json 的 findString 匹配失败 → 整条补丁没生效；
+          （2）原版 <<buswait>> 被 ModI18N 译成中文，于是街上那条链接显示为
+               "Wait for a bus"，即用户看到的「【等公交】变成了英文」。
+        boot.json 里的 findString 用的是同一段中文，两处必须保持一致 ——
+        改动其中一处时，务必同步另一处。
+
+   如果将来换了别的汉化 mod（译文可能不同），这两处都要跟着改。 */
+<<widget "buswait">>
+	<<add_link "<<busicon>><<link [[等待公交车 (0:02)|Bus]]>><<pass 2>><</link>><br>">><<hideDisplay>>
+	<<add_link "<<robertTaxiIcon>><<link [[等待出租车 (0:02)|Robert Taxi]]>><<pass 2>><</link>><br>">><<hideDisplay>>
+<</widget>>
+
+/* 陌生司机：无事发生，正常送到目的地。
+   ⚠️ 只用于「司机本来就是陌生人」的普通车程。
+      「坐后座」**不再**走这里 —— 后座必然进两个事件之一
+      （Robert Taxi Back Anger 1 / Robert Taxi Back Find 1），见 Robert Taxi Seat 的后座分支。 */
+<<widget "robertTaxiStrangerDrive">>
+	司机是个沉默的陌生人。计价器咔哒一声跳了数字，他一路没说话，只是把车开得很稳。
+	<br>
+	街灯一盏接一盏地从车窗上滑过去。你靠着椅背，看着窗外的招牌换了一轮又一轮。
+	<br><br>
+	<<robertTaxiArriveLink>>
+<</widget>>
+
+/* ---------------------------------------------------------------------------
+ * 到达：只给一个【继续】按钮
+ *
+ * ⚠️ 这里**不能**用原版的 <<destination5>> / <<destinationeventend>>：
+ *    <<destination5>> 会调 <<domus>>/<<oxford>> 这类 widget，它们通过
+ *    <<add_link>> 往 $link_table 里塞一条「牛津街 (0:05) (学校)」的旅行链接，
+ *    最后由 <<displayLinks>> 渲染出来 —— 结果玩家会同时看到
+ *    「目的地链接」和「继续」两个按钮，而且两者点击效果完全一样。
+ *    <<destinationeventend>> 更是会生成一个「Next」按钮，同样多余。
+ *
+ * 所以本 mod 自己渲染一个纯文本 + 单个 <<link>>，按 $bus 映射到对应的街道段落。
+ * 车程的 5 分钟已经在目的地的 <<pass 5>> 里走完了，这里不再推进时间。
+ * ------------------------------------------------------------------------- */
+<<widget "robertTaxiArriveText">>
+	<<switch $bus>>
+		<<case "nightingale">>你认出这是南丁格尔街。车在医院门口停下，你推门下车。
+		<<case "domus">>你认出这是多姆斯街。车靠着路边停下，孤儿院就在不远的地方。
+		<<case "elk">>你认出这是麋鹿街。车在路边停下，你推门下车。
+		<<case "high">>你认出这是高街。购物中心的灯光从车窗上淌过去，车在路边停下。
+		<<case "starfish">>你认出这是海星街。咸腥的风从车窗缝里钻进来，车在路边停下。
+		<<case "barb">>你认出这是巴布街。车在那间工作室附近停下。
+		<<case "connudatus">>你认出这是康努达图斯街。夜店招牌在车窗外一闪而过。
+		<<case "wolf">>你认出这是狼街。车在神殿的方向停下。
+		<<case "harvest">>你认出这是收获街。酒馆的喧闹声隔着车窗都听得见。
+		<<case "oxford">>你认出这是牛津街。学校的围墙从车窗外缓缓滑过。
+		<<case "danube">>你认出这是多瑙街。宅邸区的铁门一座接一座地过去。
+		<<case "mer">>你认出这是梅尔街。码头方向的空气潮湿又发凉。
+		<<case "cliff">>你认出这是悬崖街。那间咖啡馆的灯还亮着。
+		<<case "lakebus">>你认出这是湖边。水面在夜色里泛着细碎的光。
+		<<default>>你认出这已经到了目的地附近。
+	<</switch>>
+	<br><br>
+<</widget>>
+
+/* 到达按钮：按 $bus 指向对应街道段落。
+ *
+ * _args[0] = 可选，按钮文字。省略时为「继续」—— 既有调用点全都不传参，
+ *            行为与本参数化之前完全一致；后座摸东西事件传 "下车"。
+ * ⚠️ 不要把链标复制成一整套「下车」版本：文字用 <<= >> 在链标里拼是本 mod
+ *    既有写法（见 robert-tweak.twee 的 <<robertOption>>），目标段落保持字面量。
+ * ⚠️ 到达**只能**用本 widget。原版 <<destination5>> / <<destinationeventend>>
+ *    会多塞一条旅行链接（见 README §5.3）。 */
+<<widget "robertTaxiArriveLink">>
+	<<set _rtArriveLabel to _args[0] ?? "继续">>
+	<<switch $bus>>
+		<<case "oxford">><<link [[<<= _rtArriveLabel>>|Oxford Street]]>><</link>>
+		<<case "domus">><<link [[<<= _rtArriveLabel>>|Domus Street]]>><</link>>
+		<<case "barb">><<link [[<<= _rtArriveLabel>>|Barb Street]]>><</link>>
+		<<case "danube">><<link [[<<= _rtArriveLabel>>|Danube Street]]>><</link>>
+		<<case "wolf">><<link [[<<= _rtArriveLabel>>|Wolf Street]]>><</link>>
+		<<case "high">><<link [[<<= _rtArriveLabel>>|High Street]]>><</link>>
+		<<case "connudatus">><<link [[<<= _rtArriveLabel>>|Connudatus Street]]>><</link>>
+		<<case "cliff">><<link [[<<= _rtArriveLabel>>|Cliff Street]]>><</link>>
+		<<case "nightingale">><<link [[<<= _rtArriveLabel>>|Nightingale Street]]>><</link>>
+		<<case "starfish">><<link [[<<= _rtArriveLabel>>|Starfish Street]]>><</link>>
+		<<case "elk">><<link [[<<= _rtArriveLabel>>|Elk Street]]>><</link>>
+		<<case "mer">><<link [[<<= _rtArriveLabel>>|Mer Street]]>><</link>>
+		<<case "harvest">><<link [[<<= _rtArriveLabel>>|Harvest Street]]>><</link>>
+		<<case "lakebus">><<link [[<<= _rtArriveLabel>>|Lake Shore]]>><</link>>
+		<<default>><<link [[<<= _rtArriveLabel>>|Domus Street]]>><</link>>
+	<</switch>>
+<</widget>>
+
+/* 罗伯特当司机：问候 + 选座位。
+   【坐后座】回到本段落（Robert Taxi Seat），此时 $robertTaxiSeat 为 "back"，
+   于是跳过司机掷骰，由那里的后座分支决定「走后座事件」还是「走陌生司机流程」。
+   ⚠️ 后座事件的触发判定**不在本 widget 里**，见 Robert Taxi Seat 的后座分支。
+
+   ⚠️ 数值规则（**提示的符号个数 = 数值幅度**，见 README §5.2 与 skill）：
+       初次见面：性欲 +1，**爱意不加**
+       再次搭乘：性欲 +1，爱意 +1（爱意 > 30 时为 +2，走 RobertNPC.loveGain()，
+                 提示由 <<robertLoveChip>> 按实际幅度输出 + 或 + +）
+     这些变化只作用在罗伯特身上；走 JS 接口，不用原版 <<npcincr>>（原因见 README §5.1）。 */
+<<widget "robertTaxiRobertDrive">>
+	<<if !RobertNPC?.canAppear?.()>>
+		<<run RobertNPC?.markMet?.()>>
+		<<run RobertNPC?.addStat?.('lust', 1)>>
+		司机从后视镜里看了你一眼，像是认出了你。他把计价器按了下去，咔哒一声。
+		<br>
+		「……是你啊。」他把车汇进车流，「我叫罗伯特。以后要车，招手就行。」
+		<br>
+		你没接话，只是点了点头。前挡风玻璃外的街景开始一格格往后退。
+		<br><br>
+		<<= RobertNPC?.t ? RobertNPC.t('RobertNPC.taxi.chooseSeat') : '罗伯特问你想坐哪儿。'>>
+		<br><br>
+		<<glust "Robert">>
+	<<else>>
+		<<run RobertNPC?.addStat?.('lust', 1)>>
+		<<run RobertNPC?.addStat?.('love', RobertNPC?.loveGain?.() ?? 1)>>
+		又是罗伯特的车。他朝后视镜里的你点了点头，指尖在方向盘上敲了两下。
+		<br>
+		你拉上车门，坐进车里。罗伯特向你询问你想去哪里，你回复后，关上车门，汽车缓慢启动。
+		<br><br>
+		<<glust "Robert">><<robertLoveChip>>
+	<</if>>
+	<<link [[坐副驾驶|Robert Taxi Front Seat Intro]]>><<set $robertTaxiSeat to "front">><</link>>
+	<br>
+	<<link [[坐后座|Robert Taxi Seat]]>><<set $robertTaxiSeat to "back">><</link>>
+	<br>
+
+<</widget>>
+
+/* ---------------------------------------------------------------------------
+ * 淫乱判定（<<robertTaxiLewd 档位>>）
+ *
+ * 用原版 hasSexStat("promiscuity", N) 判断，等级阈值（原版 ingame.js:1518-1544）：
+ *   1 级 → promiscuity >= 1
+ *   2 级 → >= 15
+ *   3 级 → >= 35
+ *
+ * ⚠️ 0 级与 1 级是**同一个判定**：原版 hasSexStat 里 1 级只用来判断
+ *    「是否大于 0」，1 级动作本来就应该始终可用。所以 0 级也按 1 级的效果走，
+ *    显示上也统一写「淫乱 1级」。传 _args[0]=1 表示「1 级及以下档位」，
+ *    _args[0]=2 表示「2 级及以上档位」。
+ *
+ * ⚠️⚠️ 加的是 PC 的**性奋（arousal）**，不是罗伯特的**性欲（lust）**！
+ *    这两个中文名很像但是完全不同的东西：
+ *      性奋 arousal → 玩家自己的兴奋度，$arousal，上限 $arousalmax = 10000
+ *      性欲 lust    → 罗伯特这个 NPC 的属性，存在 V.NPCName 的 Robert 对象上
+ *    本 widget 只动 PC 的性奋/压力，罗伯特的属性由 <<robertTaxiEndHold>> 等结算。
+ *
+ * ⚠️⚠️ 数值必须乘 RObertNPC.AROUSAL_SCALE（=100）：
+ *    原版 <<arousal N>> 里 N 是**原始值**，$arousalmax 是 10000。
+ *    直接写 <<arousal 10>> 只加 0.1%，侧边栏完全看不出变化
+ *    （原版自己的手感基准：轻微 200–300、明显 600、强烈 1000–2000）。
+ *    需求说的「+10」是玩家视角的「10 点」，乘 100 后 = 1000 原始值，
+ *    正好对应原版「强烈」档，侧边栏能明显看到。
+ *
+ *    <<stress N>> 不一样：它内部已经乘了 40，所以 N 本身就是「玩家视角的点数」，
+ *    <<stress 10>> = 400 原始值，不需要再换算。
+ *
+ * ⚠️ 换算写法用**反引号**包住表达式（原版惯用法，见 base-system/promiscuity.twee:100
+ *    的 <<arousal `$_n * 100`>>）。不要写成 <<arousal 10 * 100>> ——
+ *    宏参数没有括号保护时可能被拆成两个参数。
+ *
+ * 提示文本**只出现在选项里**（由 <<robertLewdOption>> 渲染），
+ * 本 widget 保持静默、只改数值 —— 数值是「点选项」触发的，
+ * 写在正文里等于宣称「读到这里数值就变了」，那是错的。
+ * ------------------------------------------------------------------------- */
+<<widget "robertTaxiLewd">>
+	<<set _rtTier to _args[0] ?? 1>>
+
+	/* ⚠️ 手感调整（需求）：【保持不动】这条路线的性奋增长过快，
+	   这里整体减为原来的 1/4。
+	   原始系数是 30 / 20 / 10，除以 4 后为 7.5 / 5 / 2.5，
+	   乘 AROUSAL_SCALE(100) 即 750 / 500 / 250。
+	   改这一个常量就能整体缩放，不要逐个去改下面的数字。 */
+	<<set _rtScale to (RobertNPC?.AROUSAL_SCALE ?? 100) / 4>>
+
+	<<if hasSexStat("promiscuity", 3)>>
+		<<arousal `30 * _rtScale`>>
+	<<elseif hasSexStat("promiscuity", 2)>>
+		<<arousal `20 * _rtScale`>>
+	<<elseif _rtTier gte 1>>
+		<<stress 10>>
+		<<arousal `10 * _rtScale`>>
+	<</if>>
+<</widget>>
+
+/* ---------------------------------------------------------------------------
+ * 怒气提示（原版没有 rage 的提示宏，本 mod 自建一套）
+ *
+ * ⚠️⚠️ **提示的符号个数 = 数值幅度**（本 mod 的书写规范，见 skill / README §5.2）：
+ *      <<grage>>    +1      <<ggrage>>   +2      <<gggrage>>  +3
+ *      <<lrage>>    −1      <<llrage>>   −2      <<lllrage>>  −3
+ *    命名照抄原版的 dom 系列（gdom / ggdom / gggdom、ldom / lldom / llldom），
+ *    这样「用户说两个 +」→ 写 <<ggrage>> 并把数值设成 +2，两边天然一致。
+ *
+ * ⚠️ statDisplay.statChange 的第一个参数是**显示文本**，不是键名。
+ *    第一版硬编码 "Rage"，中文界面里就单独冒出一个英文词（截图里的「+ Rage」）。
+ *    现在走 RobertNPC.chipLabel('rage') → 「罗伯特的怒气」/「Robert's Rage」。
+ * ⚠️ 宏名不带 robert 前缀是**故意的**：将来原版补上同名宏时风格一致。
+ *    标签里已经带了罗伯特的名字，所以它们只在本 mod 的场景里用。
+ * ------------------------------------------------------------------------- */
+<<widget "grage">><<= statDisplay.statChange(RobertNPC?.chipLabel ? RobertNPC.chipLabel('rage') : "罗伯特的怒气", 1, "gold")>><</widget>>
+<<widget "ggrage">><<= statDisplay.statChange(RobertNPC?.chipLabel ? RobertNPC.chipLabel('rage') : "罗伯特的怒气", 2, "gold")>><</widget>>
+<<widget "gggrage">><<= statDisplay.statChange(RobertNPC?.chipLabel ? RobertNPC.chipLabel('rage') : "罗伯特的怒气", 3, "gold")>><</widget>>
+<<widget "lrage">><<= statDisplay.statChange(RobertNPC?.chipLabel ? RobertNPC.chipLabel('rage') : "罗伯特的怒气", -1, "gold")>><</widget>>
+<<widget "llrage">><<= statDisplay.statChange(RobertNPC?.chipLabel ? RobertNPC.chipLabel('rage') : "罗伯特的怒气", -2, "gold")>><</widget>>
+<<widget "lllrage">><<= statDisplay.statChange(RobertNPC?.chipLabel ? RobertNPC.chipLabel('rage') : "罗伯特的怒气", -3, "gold")>><</widget>>
+
+/* 爱意提示：按 RobertNPC.loveGain() 的**实际**幅度给出对应符号数。
+   ⚠️ loveGain() 在爱意 > 30 时给 2，否则给 1；提示必须跟着变，
+      否则就会出现「显示一个 +、实际加 2」这种不符（本 mod 的规范不允许）。
+   用法：把 <<glove "Robert">> 换成 <<robertLoveChip>> 即可。 */
+<<widget "robertLoveChip">>
+	<<set _rlGain to RobertNPC?.loveGain?.() ?? 1>>
+	<<if _rlGain gte 3>><<ggglove "Robert">>
+	<<elseif _rlGain is 2>><<gglove "Robert">>
+	<<else>><<glove "Robert">><</if>>
+<</widget>>
+
+/* ---------------------------------------------------------------------------
+ * 事件收尾效果
+ *
+ * 两个分支的数值都**只作用在罗伯特身上**，走 JS 接口（不用原版 <<npcincr>>，
+ * 原因见 README.md §5.1）。
+ *
+ * ⚠️ 爱意的「再乘 +2」门槛写在 window.RobertNPC.loveGain() 里：
+ *    爱意 > 30 时给 2，否则给 1。这样门槛只有一处定义，改规则不会漏改。
+ * ------------------------------------------------------------------------- */
+
+/* 以「保持不动」结束：性欲 +2，爱意 +1（爱意 > 30 时为 +2）。
+   ⚠️ 提示宏的参数是 **NPC 名**（不是数量）—— 写成 <<glust>>（无参）
+      会印成「+ 性欲」，看不出是谁的属性；本 mod 的属性全是罗伯特的，
+      所以一律传 "Robert"，显示成「+ 罗伯特的性欲」。
+   ⚠️ 性欲 +2 → 用 <<gglust>>（两个加号）；爱意走 <<robertLoveChip>>。 */
+<<widget "robertTaxiEndHold">>
+	<<run RobertNPC?.addStat?.('lust', 2)>>
+	<<run RobertNPC?.addStat?.('love', RobertNPC?.loveGain?.() ?? 1)>>
+	<<gglust "Robert">><<robertLoveChip>>
+<</widget>>
+
+/* 以「摆动腿部远离罗伯特的手」结束：按性欲 / 爱意区间追加怒气与爱意变化。
+   ⚠️ 数值与提示**逐档对齐**（符号个数 = 幅度）：
+        lust > 80 → 怒气 +3 <<gggrage>> ；> 50 → +2 <<ggrage>> ；> 30 → +1 <<grage>>
+        love > 80 → 爱意 −3 <<llllove>>；> 50 → −2 <<lllove>>；> 30 → −1 <<llove>>
+   两个 <<if>> 链各自只命中一条，所以每个属性每次只有一个提示块。 */
+<<widget "robertTaxiEndSwing">>
+	<<set _rtLust to RobertNPC?.getStat?.('lust') ?? 0>>
+	<<set _rtLove to RobertNPC?.getStat?.('love') ?? 0>>
+	<<if _rtLust gt 80 and _rtLust lte 100>>
+		<<run RobertNPC?.addStat?.('rage', 3)>><<gggrage>>
+	<<elseif _rtLust gt 50 and _rtLust lte 80>>
+		<<run RobertNPC?.addStat?.('rage', 2)>><<ggrage>>
+	<<elseif _rtLust gt 30 and _rtLust lte 50>>
+		<<run RobertNPC?.addStat?.('rage', 1)>><<grage>>
+	<</if>>
+	<<if _rtLove gt 80 and _rtLove lte 100>>
+		<<run RobertNPC?.addStat?.('love', -3)>><<llllove "Robert">>
+	<<elseif _rtLove gt 50 and _rtLove lte 80>>
+		<<run RobertNPC?.addStat?.('love', -2)>><<lllove "Robert">>
+	<<elseif _rtLove gt 30 and _rtLove lte 50>>
+		<<run RobertNPC?.addStat?.('love', -1)>><<llove "Robert">>
+	<</if>>
+<</widget>>
+
+/* 以【为其口交】结束（副驾驶线到达时的余韵）。
+   性欲 +2、爱意按门槛给 ——「他刚被服务过」的余韵比「只被摸腿」略明显。
+   ⚠️ 提示必须与数值同档：性欲 +2 → <<gglust>>；爱意走 <<robertLoveChip>>。
+   ⚠️⚠️ 这里原来写的是 <<glust 8>> —— 那是**错的**：提示宏的参数是 NPC 名，
+      传数字会渲染成「+ 8的性欲」（ModI18N 里是 `${setup.NPC_CN_NAME(8)}的性欲`，
+      非字符串参数会原样返回）。现在数值本身也收进 1–3 档，两边一致。 */
+<<widget "robertTaxiEndOral">>
+	<<run RobertNPC?.addStat?.('lust', 2)>>
+	<<run RobertNPC?.addStat?.('love', RobertNPC?.loveGain?.() ?? 1)>>
+	<<gglust "Robert">><<robertLoveChip>>
+<</widget>>
+
+/* ---------------------------------------------------------------------------
+ * 后座事件线（恋人专属）的数值**不在这里** ——
+ * 它们直接写在 Robert Taxi Back Anger 1【后座·页面2】的两个选项链接里，
+ * 因为需求是「选择该选项就结算」。
+ *
+ * 但显示用的提示宏仍然只有下面这些，写新页面时照抄：
+ *   ⚠️⚠️ **提示的符号个数 = 数值幅度**（本 mod 的书写规范）：
+ *      dom   gdom +1 / ggdom +2 / gggdom +3 ；ldom -1 / lldom -2 / llldom -3
+ *      lust  glust +1 / gglust +2 / ggglust +3 ；llust -1 / lllust -2 / llllust -3
+ *      love  glove +1 / gglove +2 / ggglove +3 ；llove -1 / lllove -2 / llllove -3
+ *      rage  grage +1 / ggrage +2 / gggrage +3 ；lrage -1 / llrage -2 / lllrage -3
+ *            （本 mod 自建的 6 个变体，见本文件前面的「怒气提示」一节）
+ *      出处：原版 base-system/text.js:258-263（lust）、:701-730（dom）。
+ *      传 "Robert" 是必需的 —— 罗伯特不在原版 $NPCName 里，不传会取不到名字。
+ *   ⚠️ 所以：**要 +2 就写 <<gglust "Robert">> 并把数值设成 +2**，
+ *      不要再出现「一个 + 号、实际 +5」或「三个提示块凑 −5」这种写法
+ *      （历史上两种都踩过，见 README §8 故障 5）。
+ *   ⚠️ 单次增减请控制在 1–3 档以内；超过 3 档没有对应变体，
+ *      要么拆成多次，要么先跟需求方确认。
+ *   ⚠️ 怒气（rage）原版**没有**提示宏，用本 mod 自建的
+ *      <<grage>> / <<ggrage>> / <<gggrage>> 与 <<lrage>> / <<llrage>> / <<lllrage>>。
+ *   ⚠️ 爱意按 loveGain() 浮动时用 <<robertLoveChip>>，它会自动给出对应符号数。
+ * ------------------------------------------------------------------------- */

@@ -1,0 +1,103 @@
+/* ---------------------------------------------------------------------------
+ * RobertNPC —— 样式
+ *
+ * 全部 class 以 robert- 开头，避免覆盖原版或其他 mod 的样式。
+ * 想改配色只改这里的 CSS 变量即可。
+ * ------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+ * 1. 选项与效果提示
+ *
+ * ⚠️ 选项不用 <ul>/<li>，而是原版/哈珀 mod 的写法：
+ *        <<link [[继续|目标段落]]>><<set 变化>><</link>><<gstress>>
+ *        <br>
+ *    颜色宏是 <<link>> 的**兄弟节点**，由原版主题负责上色，本 mod 不插手。
+ *
+ *    绝不能把颜色宏放进链标 [[…]]：DoL 覆写的 <<link>> 会对链标取
+ *    .textContent，HTML 标记被剥掉只剩文字，于是文字挤到「继续」后面。
+ *    详见 robert-tweak.twee 顶部说明。
+ *
+ * 所以下面**没有**任何针对选项颜色的自定义样式 —— 让原版主题处理就好。
+ * ------------------------------------------------------------------------- */
+
+/* 旧类名保留，万一有残留引用不至于丢排版 */
+.robert-eff-block,
+.robert-lewd-line {
+	display: block;
+	line-height: 1.9;
+	margin: 0.25em 0 0.5em;
+}
+
+.robert-intro,
+.robert-menu-title,
+.robert-panel {
+	--robert-accent: #6b8cae;
+	--robert-accent-dark: #4a6580;
+	--robert-track: rgba(255, 255, 255, 0.18);
+}
+
+.robert-intro-title,
+.robert-menu-title,
+.robert-panel-title {
+	color: var(--robert-accent);
+	font-weight: bold;
+	margin-bottom: 0.4em;
+}
+
+.robert-panel {
+	border: 1px solid var(--robert-accent-dark);
+	border-radius: 4px;
+	padding: 0.6em 0.8em;
+	margin: 0.6em 0;
+	background: rgba(0, 0, 0, 0.15);
+}
+
+.robert-portrait {
+	display: block;
+	max-width: 180px;
+	height: auto;
+	margin: 0.4em auto;
+	border-radius: 4px;
+}
+
+.robert-statbar {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	margin: 0.25em 0;
+	font-size: 0.95em;
+}
+
+.robert-statbar-label {
+	flex: 0 0 8em;
+}
+
+.robert-statbar-track {
+	flex: 1 1 auto;
+	height: 0.7em;
+	background: var(--robert-track);
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.robert-statbar-fill {
+	display: block;
+	height: 100%;
+	background: var(--robert-accent);
+	transition: width 0.25s ease;
+}
+
+.robert-statbar-value {
+	flex: 0 0 3em;
+	text-align: right;
+}
+
+.robert-choices {
+	list-style: none;
+	padding-left: 0;
+	margin-top: 0.6em;
+}
+
+.robert-choices > li {
+	margin: 0.2em 0;
+}

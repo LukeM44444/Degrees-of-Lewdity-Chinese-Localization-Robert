@@ -1,0 +1,32 @@
+:: Robert StoryInit [widget]
+/* ---------------------------------------------------------------------------
+ * RobertNPC —— StoryInit
+ *
+ * ⚠️ 重要：DoL 的 StoryInit 语义和一般 SugarCube 游戏不同。
+ *    原版变量文件 game/04-Variables/variables-start.twee:1-10 里作者明确写了：
+ *
+ *      「This passage runs EVERY time the page is opened or refreshed...」
+ *      「This passage ALWAYS runs BEFORE story variables are loaded, meaning
+ *        EVERY variable is undefined. Checking if they are undefined WILL NOT WORK.」
+ *      「You should ONLY use this passage to define setup variables, NOT story variables.」
+ *
+ *    所以这里**不能**初始化 V.robert —— 此刻存档还没载入，
+ *    写进去的值要么被读档覆盖，要么在标题画面就污染了空 State。
+ *
+ *    本 mod 的正确初始化位置是 JS 侧的 $(document).on(':passageinit', ...)，
+ *    见 modules/robert-stats.js 末尾。那个时机 V 已经载入，且幂等，可反复调用。
+ *
+ *    本段落目前只做一件事：验证命名空间可用，并把结果打到控制台。
+ *    命名空间是 window.RobertNPC（**不是** setup.RobertNPC）—— 原因见 framework.js 顶部注释：
+ *    maplebirchAddon 的 params.script 在 SugarCube 启动前执行，那时 setup / V 都还不存在。
+ *    它带 [widget] 标签，不会被渲染。
+ * ------------------------------------------------------------------------- */
+
+<<run (function () {
+	try {
+		window.RobertNPC ??= {};
+		console.log('[RobertNPC] StoryInit 就绪，版本 ' + (window.RobertNPC.VERSION || '?'));
+	} catch (e) {
+		console.error('[RobertNPC] StoryInit 失败:', e);
+	}
+})()>>

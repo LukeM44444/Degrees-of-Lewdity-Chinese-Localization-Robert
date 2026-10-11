@@ -1,0 +1,110 @@
+:: Robert Tweak [widget]
+/* ---------------------------------------------------------------------------
+ * RobertNPC —— widget / 宏定义
+ * * 段落名带 "Robert" 前缀，widget 名带 "robert" 前缀，
+ * 不会和原版或其他 mod（象牙怨灵 Wraith*、哈珀 harper*）重名。
+ * 本段落带 [widget] 标签，即使玩家跳转到它也不会被渲染。
+ *
+ * ⚠️⚠️ 选项的写法完全照抄原版与哈珀 mod 的既有惯例，不要自创：
+ *
+ *   1. **不用 <ul>/<li>** —— 每个选项是**单独一行**的 <<link>>，
+ *      行与行之间用 <br> 分隔：
+ *          <<link [[继续|目标段落]]>><<set 变化>><</link>><<gstress>>
+ *          <br>
+ *          <<link [[结束|目标段落]]>><</link>>
+ *
+ *      参考：
+ *        - 原版 game/overworld-town/loc-street/domus.twee
+ *              <<tficon "demon">><<link [[…]]>><<pass 30>><</link>><<demon>>
+ *        - 哈珀 mod harper-asylum.twee:554-557
+ *              <<link [[继续装睡|…]]>><<stress 3>><<arousal 300>><</link>><<gstress>><<garousal>>
+ *              <br>
+ *              <<link [[睁开双眼|…]]>><<stress 6>><<suspicion 3>><</link>><<gstress>><<gsuspicion>>
+ *
+ *      哈珀 mod 全库 0 个 <ul>/<li>，全部是这种形式 —— 它之所以能正常显示
+ *      彩色提示，就是因为颜色宏是 <<link>> 的**兄弟节点**，不是链标的一部分。
+ *
+ *   2. 颜色提示**绝不能放进链标 [[…]]** 里：
+ *      DoL 覆写了 <<link>>（01-overrides/link-override.js:38）：
+ *          $link.append(document.createTextNode(
+ *              Wikifier.wikifyEval(this.args[0].text).textContent));
+ *      链标会被取 .textContent，HTML 标记被剥掉只剩文字，
+ *      于是标记散架、文字挤到「继续」后面 —— 就是「错位 / 多出字段」的根源。
+ *
+ *   3. 颜色宏用原版已有的：<<gstress>> / <<garousal>> / <<glust N>> /
+ *      <<promiscuous1..3>>。不要自己发明带样式的链标。
+ * ------------------------------------------------------------------------- */
+
+<<widget "robertName">><<= RobertNPC?.t ? RobertNPC.t('RobertNPC.name') : '罗伯特'>>><</widget>>
+
+/* 属性条目。四个属性名沿用原版字段：rage / lust / love / dom
+   用法：<<robertStat rage>>             → 文字 + 数值
+         <<robertStat lust "bar">>       → 带进度条
+         <<robertStat love "set" 30>>    → 设为 30
+         <<robertStat dom "add" 5>>      → 增加 5 */
+<<widget "robertStat">><<set _rbKey to _args[0] ?? 'love'>><<set _rbMode to _args[1] ?? 'text'>><<if _rbMode is 'set'>><<run RobertNPC?.setStat?.(_rbKey, _args[2] ?? 0)>><<elseif _rbMode is 'add'>><<run RobertNPC?.addStat?.(_rbKey, _args[2] ?? 0)>><<elseif _rbMode is 'bar'>><<= RobertNPC?.statBar ? RobertNPC.statBar(_rbKey) : ''>><<else>><<= RobertNPC?.statText ? RobertNPC.statText(_rbKey) : ''>><</if>><</widget>>
+
+/* ---------------------------------------------------------------------------
+ * 选项 widget —— 形状与哈珀 mod 完全一致：
+ *   <<link [[标签|目标]]>>[点击时的变化]<</link>>[颜色提示宏]
+ *
+ * 每个 widget 输出**一整行选项**（含结尾 <br>），所以段落里只写这一个宏。
+ *
+ * robertOption       普通选项
+ * robertLewdOption   带淫乱判定的选项（显示 +性奋 / +压力 / 淫乱 N）
+ * robertArousalOption 只加性奋的选项
+ * ------------------------------------------------------------------------- */
+
+/* 普通选项。_args[0] = [[标签|目标]] */
+<<widget "robertOption">>
+<<set _roNode to _args[0]>>
+<<link [[<<= _roNode.text ?? _roNode.textContent ?? "">>|_roNode.link]]>><</link>>
+<br>
+<</widget>>
+
+/* 带淫乱判定的选项。
+   _args[0] = [[标签|目标]]
+   _args[1] = 可选；指定点击时要 +1 的**存档变量名**（不含 $）：
+                "robertTaxiJump"      → 循环页计数
+                "robertTaxiBackJump"  → 【摸回去】分支计数
+              "count" 是 robertTaxiJump 的旧别名，保留兼容。
+              其它值（或省略）表示点击时不加计数。
+   _args[2] = 可选；**门槛等级**。传入时提示里用这个等级而不是玩家当前等级
+              （用于「这个选项要求淫乱 ≥N」这种展示；见【摸回去】）。
+
+   颜色提示由 <<robertLewdMarks _args[2]>> 给出，与 <<robertTaxiLewd>> 的判定一致。 */
+<<widget "robertLewdOption">>
+<<set _rbNode to _args[0]>>
+<<link [[<<= _rbNode.text ?? _rbNode.textContent ?? "">>|_rbNode.link]]>><<if _args[1] is "robertTaxiJump" or _args[1] is "count">><<set $robertTaxiJump += 1>><<elseif _args[1] is "robertTaxiBackJump">><<set $robertTaxiBackJump += 1>><</if>><</link>><<robertLewdMarks _args[2]>>
+<br>
+<</widget>>
+
+/* 淫乱判定的颜色提示，形如：<<gstress>><<garousal>><<promiscuous1>>
+   _args[0] = 可选；强制显示的等级（门槛）。省略时按玩家当前等级。
+
+   等级规则（0 级与 1 级同判定）：
+     0 / 1 级   → 性奋 + 压力 + 淫乱 1
+     2 级       → 性奋 + 淫乱 2（不加压力）
+     3 级及以上 → 性奋 + 淫乱 3（不加压力）
+   ⚠️ 罗伯特的性欲**不**出现在这里：本判定不改它，只在收尾时结算。
+   ⚠️ 用无参变体 <<promiscuous1>>，不要用 <<promiscuous N>>（会读
+      _desperateaction，属没必要的耦合）。 */
+<<widget "robertLewdMarks">>
+<<set _rlmLvl to _args[0] ?? RobertNPC?.promiscuityDisplayLevel?.() ?? 1>>
+<<if _rlmLvl lte 1>><<gstress>><</if>><<garousal>><<if _rlmLvl is 1>><<promiscuous1>><<elseif _rlmLvl is 2>><<promiscuous2>><<else>><<promiscuous3>><</if>>
+<</widget>>
+
+/* 只加性奋的选项。
+   _args[0] = [[标签|目标]]
+   _args[1] = 本次加多少 $arousal（原始值，上限 $arousalmax = 10000）
+   _args[2] = 可选；"count" 表示点击时 $robertTaxiJump +1 */
+<<widget "robertArousalOption">>
+<<set _raNode to _args[0]>>
+<<set _raAmount to Number(_args[1] ?? 0)>>
+<<link [[<<= _raNode.text ?? _raNode.textContent ?? "">>|_raNode.link]]>><<arousal `_raAmount`>><<if _args[2] is "count">><<set $robertTaxiJump += 1>><</if>><</link>><<if _raAmount gte 500>><<ggarousal>><<else>><<garousal>><</if>>
+<br>
+<</widget>>
+
+<<widget "robertPortrait">><<if RobertNPC?.IMG>><img src=<<= JSON.stringify(RobertNPC.IMG.portrait)>> alt="罗伯特" class="robert-portrait"><</if>><</widget>>
+
+<<widget "robertStatusPanel">><div class="robert-panel"><div class="robert-panel-title"><<robertName>></div><<robertPortrait>><div class="robert-panel-body"><<= RobertNPC?.statBars ? RobertNPC.statBars() : ''>></div></div><</widget>>

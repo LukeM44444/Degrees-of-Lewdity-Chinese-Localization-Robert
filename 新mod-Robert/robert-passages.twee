@@ -1,0 +1,70 @@
+:: Robert Intro
+/* RobertNPC 初见段落。本 mod 只新增段落，不覆盖任何原版段落，所以与象牙怨灵 / 哈珀 mod 零冲突。要让玩家找到入口，用 TweeReplacer 或 ReplacePatcher 在原版段落里挂链接，写法见 README.md §5。 */
+
+<<set _rbTitle to RobertNPC?.t ? RobertNPC.t('RobertNPC.intro.title') : '街角的陌生人'>>
+<<set _rbText to RobertNPC?.t ? RobertNPC.t('RobertNPC.intro.text') : '你在街角看见一个靠在墙边抽烟的年轻男人。'>>
+
+<div class="robert-intro">
+	<div class="robert-intro-title"><<= _rbTitle>></div>
+	<p><<= _rbText>></p>
+</div>
+
+<<robertOption [[走近他|Robert Greet]]>>
+<<robertOption [[不理会|Robert Leave]]>>
+
+
+
+:: Robert Greet
+<<set _rbGreet to RobertNPC?.t ? RobertNPC.t('RobertNPC.intro.greet') : '「……你是新来的？」他叫罗伯特。'>>
+
+/* 初次见面：性欲 +1，**爱意不加**（需求指定：爱意要靠后续剧情推动）。
+   数值只作用在罗伯特身上；走 JS 接口，不用原版 <<npcincr>>（原因见 README §5.1）。
+   ⚠️ 提示宏的参数是 **NPC 名**（不是数量）：<<glust "Robert">> → 「+ 罗伯特的性欲」。
+      写成无参的 <<glust>> 只会显示「+ 性欲」，看不出是谁的属性。
+   ⚠️ **符号个数 = 数值幅度**：一个 + 对应 +1。 */
+<<run RobertNPC?.markMet?.()>>
+<<run RobertNPC?.addStat?.('lust', 1)>>
+<<glust "Robert">>
+
+<div class="robert-intro">
+	<p><<= _rbGreet>></p>
+</div>
+
+<<robertStatusPanel>>
+
+<<robertOption [[继续|Robert Menu]]>>
+
+
+
+:: Robert Leave
+<<= RobertNPC?.t ? RobertNPC.t('RobertNPC.intro.leave') : '你决定不多管闲事，转身走开了。'>>
+
+<<robertOption [[返回|Bedroom]]>>
+
+
+
+:: Robert Menu
+<<if !RobertNPC?.canAppear?.()>>
+	<<= RobertNPC?.t ? RobertNPC.t('RobertNPC.status.notMet') : '尚未认识'>>
+	<br>
+	<<robertOption [[返回|Bedroom]]>>
+<<else>>
+	<div class="robert-menu-title"><<robertName>></div>
+
+	<<robertStatusPanel>>
+
+	<<robertOption [[和他说话|Robert Talk]]>>
+	<<robertOption [[返回|Bedroom]]>>
+<</if>>
+
+
+:: Robert Talk
+/* 占位段落。
+   ⚠️ 这里**故意不给爱意**：需求要求爱意只能由玩家自己设计的剧情推动。
+   现在全 mod 里能涨爱意的只有「再次搭乘罗伯特的车」（+1，爱意 > 30 时为 +2），
+   其余入口留给后续剧情。 */
+<<= RobertNPC?.t ? RobertNPC.t('RobertNPC.talk.idle') : '罗伯特心不在焉地应了一声。'>>
+
+<<robertOption [[返回|Robert Menu]]>>
+<<robertOption [[回卧室|Bedroom]]>>
+

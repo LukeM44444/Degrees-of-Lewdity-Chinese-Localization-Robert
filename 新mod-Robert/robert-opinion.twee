@@ -1,0 +1,96 @@
+:: Robert Opinion [widget]
+/* ===========================================================================
+ * 罗伯特对玩家的看法
+ * ===========================================================================
+ *
+ * 显示位置：社交页面 → 罗伯特的格子。
+ * 链路是原版自带的，不需要另做界面：
+ *      <<widget "relation-box">>（base-system/widgets.twee:3380）
+ *        → <<npcrelationship _npcData.nam>>
+ *          → <<relationshiptext>>
+ * 本 mod 用 TweeReplacer 在 <<npcrelationship>> 里加一个 Robert 分支，
+ * 命中时改调 <<robertOpinionText>>，其余 NPC 完全不受影响。
+ * （选择改 <<npcrelationship>> 而不是 <<relationshiptext>>：
+ *  后者是一千多行的 <<switch _npc>>，覆盖它就得整体复制；
+ *  前者只有十几行，锚点小、长期维护成本低。）
+ *
+ * ⚠️ 判定依据是原版三个字段（V.NPCName 里的 Robert 对象）：
+ *      love（爱意） / lust（性欲） / dom（支配）
+ *    阈值按需求：
+ *      好感  低 <20   中 20–59   高 ≥60
+ *      性欲  低 <60   高 ≥60
+ *      支配  极低 ≤3   低 ≤8   高 ≥20   满 ≥80
+ *
+ * ⚠️ 文案一律走 <<print RB.t(...)>>（本 mod 自己的翻译表）：
+ *    1. **不要硬编码中文**：原版 <<relationshiptext>> 里那些句子是硬编码
+ *       英文、由 ModI18N 翻译；本 mod 是独立 mod，ModI18N 认不出这些新句子，
+ *       所以必须自带两套文案（translations/CN.json 与 EN.json）。
+ *    2. **用 <<print>>，不要用 <<=>>**：<<=>> 会对结果做 HTML 转义，
+ *       英文文案里的撇号（you'll）会变成 &#39; 直接显示出来。
+ *
+ * ⚠️⚠️ 性别相关的词一律走原版宏，**不要写死「他/她」「男/女」这类斜杠占位**：
+ *    · 「男朋友 / 女朋友」取决于 **PC** 的性别 → <<nnpc_girlfriend "Robert">>
+ *      （text.twee:5769。那个 NPC 名参数只决定人称前缀，term 本身按
+ *        $player.gender_appearance 选 —— 正好是「伴侣」这一格。）
+ *    · 罗伯特的代词 → <<nnpc_his "Robert">> / <<nnpc_He "Robert">>
+ *      （text.twee:5703/5716，按 C.npc.Robert.pronoun 选。）
+ *    这是踩过的坑：第一版把需求里的「他/她」「男/女」原样抄进文案，
+ *    社交页面就直接显示出「认为你是他/她的男/女朋友」。
+ *    因此这些条目**留在正文里用宏拼**，不进翻译表。
+ *
+ * ⚠️ 罗伯特的性别目前固定为男（framework.js 的 NPC_DATA 里
+ *    gender/pronoun 都是 'm'），但上面这些宏让文案**不依赖**这一点：
+ *    哪天要把罗伯特改成可男可女，看法这一块会自动跟着变。
+ * =========================================================================== */
+
+<<widget "robertOpinionText">>
+	/* _i 由调用方 <<npcrelationship>> 设置；widget 能读到调用方的临时变量
+	   （原版 <<relationshiptext>> 也是这么用的）。 */
+	<<set _love to $NPCName[_i].love ?? 0>>
+	<<set _lust to $NPCName[_i].lust ?? 0>>
+	<<set _dom to $NPCName[_i].dom ?? 0>>
+
+	<<robertName>>
+	<<if _love lt 20>>
+		/* ---------- 低好感 ---------- */
+		<<if _lust lt 60>>
+			<<if _dom gte 80>>
+				认为你是<span class="lewd"><<print RobertNPC.t('RobertNPC.opinion.low.lustLow.domFull')>></span>
+			<<elseif _dom gte 20>>
+				认为你是个<span class="lewd"><<print RobertNPC.t('RobertNPC.opinion.low.lustLow.domHigh')>></span>
+			<<elseif _dom gt 3>>
+				<span class="teal"><<print RobertNPC.t('RobertNPC.opinion.low.lustLow.domLow')>></span>
+			<<else>>
+				<span class="black"><<print RobertNPC.t('RobertNPC.opinion.low.lustLow.domMin')>></span>
+			<</if>>
+		<<else>>
+			<<if _dom gte 80>>
+				认为你是<span class="lewd"><<print RobertNPC.t('RobertNPC.opinion.low.lustHigh.domFull')>></span>
+			<<else>>
+				认为你是<span class="lewd"><<print RobertNPC.t('RobertNPC.opinion.low.lustHigh.domRest')>></span>
+			<</if>>
+		<</if>>
+	<<elseif _love lt 60>>
+		/* ---------- 中好感 ---------- */
+		<<if _dom gte 80>>
+			希望<span class="lewd"><<print RobertNPC.t('RobertNPC.opinion.mid.domFull')>></span>
+		<<elseif _dom gte 20>>
+			认为你可以<span class="teal"><<print RobertNPC.t('RobertNPC.opinion.mid.domHigh')>></span>
+		<<else>>
+			觉得你是一个<span class="green"><<print RobertNPC.t('RobertNPC.opinion.mid.domLow')>></span>
+		<</if>>
+	<<else>>
+		/* ---------- 高好感 ---------- */
+		<<if _lust lt 60>>
+			<<if _dom gte 80>>
+				<span class="lewd"><<print RobertNPC.t('RobertNPC.opinion.high.lustLow.domFull')>></span>
+			<<elseif _dom gte 20>>
+				认为你是<<nnpc_his "Robert">>的<span class="lewd"><<print RobertNPC.t('RobertNPC.opinion.high.lustLow.domHigh')>></span>
+			<<else>>
+				认为你是<<nnpc_his "Robert">>的<span class="pink"><<nnpc_girlfriend "Robert">></span>
+			<</if>>
+		<<else>>
+			<span class="pink"><<print RobertNPC.t('RobertNPC.opinion.high.lustHigh')>></span>
+		<</if>>
+	<</if>>
+<</widget>>
